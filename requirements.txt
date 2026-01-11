@@ -1,0 +1,86 @@
+# ============================================================================
+# KRITERION QUANT - Daily Market Analysis System
+# Requirements File
+# Python 3.9+
+# ============================================================================
+
+# --- CORE DEPENDENCIES ---
+# Data manipulation and numerical computing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# HTTP requests for EODHD API
+requests>=2.31.0
+
+# Date/time utilities
+python-dateutil>=2.8.2
+
+# --- VISUALIZATION ---
+# Interactive charts (Plotly for candlestick charts)
+plotly>=5.18.0
+
+# Streamlit framework for dashboard
+streamlit>=1.31.0
+
+# --- TEMPLATING & REPORTING ---
+# HTML template rendering for reports
+jinja2>=3.1.0
+
+# --- TELEGRAM INTEGRATION ---
+# Python Telegram Bot API
+python-telegram-bot>=20.7
+
+# --- SCHEDULING (for local/testing) ---
+# Task scheduling (optional - GitHub Actions handles production)
+schedule>=1.2.0
+
+# --- TECHNICAL INDICATORS ---
+# TA-Lib wrapper (optional - we implement custom indicators)
+# Uncomment if you want to use TA-Lib for validation
+# TA-Lib>=0.4.28
+
+# Pandas TA (alternative technical analysis library - optional)
+# pandas-ta>=0.3.14b
+
+# --- UTILITIES ---
+# Progress bars for data fetching
+tqdm>=4.66.0
+
+# Timezone handling
+pytz>=2023.3
+
+# JSON schema validation (optional)
+jsonschema>=4.20.0
+
+# --- TESTING (optional) ---
+# Unit testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# HTTP mocking for tests
+responses>=0.24.0
+
+# --- DEPLOYMENT ---
+# WSGI server (if not using Streamlit Cloud)
+gunicorn>=21.2.0
+
+# Environment variables management (alternative to secrets)
+python-dotenv>=1.0.0
+
+# --- LOGGING & MONITORING ---
+# Colored logging output
+colorlog>=6.8.0
+
+# ============================================================================
+# NOTES:
+# ============================================================================
+# 1. EODHD API: Uses 'requests' library - no special SDK needed
+# 2. Technical Indicators: Custom implementations in technical_indicators.py
+# 3. Streamlit Cloud: Automatically installs these dependencies on deploy
+# 4. GitHub Actions: pip install -r requirements.txt in workflow
+# 5. Local Development: pip install -r requirements.txt
+# 6. Optional packages commented out - uncomment if needed
+# ============================================================================
+
+# Version lock for production stability (recommended)
+# To generate locked versions: pip freeze > requirements.lock.txt
