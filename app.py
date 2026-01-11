@@ -626,7 +626,7 @@ def main():
             
             # Try to reload secrets
             try:
-                import streamlit as st
+               # import streamlit as st
                 st.write(f"st.secrets available: {hasattr(st, 'secrets')}")
                 if hasattr(st, 'secrets'):
                     st.write(f"st.secrets keys: {list(st.secrets.keys())}")
