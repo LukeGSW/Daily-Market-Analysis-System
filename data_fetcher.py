@@ -2,499 +2,588 @@
 """
 ============================================================================
 KRITERION QUANT - Daily Market Analysis System
-Configuration Module
+Data Fetcher Module - EODHD API Integration
 ============================================================================
-Definisce:
-- Universo strumenti finanziari (29 ticker)
-- Parametri operativi (rate limiting, lookback, etc)
-- Configurazione indicatori tecnici
-- Gestione secrets (EODHD API, Telegram)
+Gestisce:
+- Download dati storici da EODHD API
+- Rate limiting intelligente
+- Retry logic con exponential backoff
+- Conversione formato EODHD → DataFrame compatibile
+- Batch processing per universo completo
 ============================================================================
 """
 
-import os
-import sys
-from typing import Dict, Any
+import requests
+import pandas as pd
+import numpy as np
+import time
+import random
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+import logging
+
+from config import CONFIG, SECRETS, UNIVERSE
 
 # ============================================================================
-# SECRETS MANAGEMENT
+# LOGGING CONFIGURATION
 # ============================================================================
 
-def load_secrets() -> Dict[str, str]:
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# EODHD API CLIENT
+# ============================================================================
+
+class EODHDClient:
     """
-    Carica secrets da Streamlit secrets.toml oppure da variabili ambiente.
-    
-    Priority:
-    1. Streamlit secrets (st.secrets)
-    2. Environment variables
-    3. Fallback per testing locale
-    
-    Returns:
-        Dict con EODHD_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    Client per interagire con EODHD API.
+    Gestisce rate limiting, retry e errori.
     """
-    secrets = {}
     
-    # Try Streamlit secrets first
-    try:
-        import streamlit as st
-        secrets['EODHD_API_KEY'] = st.secrets.get('EODHD_API_KEY', '')
-        secrets['TELEGRAM_BOT_TOKEN'] = st.secrets.get('TELEGRAM_BOT_TOKEN', '')
-        secrets['TELEGRAM_CHAT_ID'] = st.secrets.get('TELEGRAM_CHAT_ID', '')
-        print("✅ Secrets caricati da Streamlit secrets.toml")
-    except:
-        # Fallback to environment variables
-        secrets['EODHD_API_KEY'] = os.getenv('EODHD_API_KEY', '')
-        secrets['TELEGRAM_BOT_TOKEN'] = os.getenv('TELEGRAM_BOT_TOKEN', '')
-        secrets['TELEGRAM_CHAT_ID'] = os.getenv('TELEGRAM_CHAT_ID', '')
-        print("✅ Secrets caricati da variabili ambiente")
+    def __init__(self, api_key: str = None):
+        """
+        Inizializza client EODHD.
+        
+        Args:
+            api_key: EODHD API Key (default: da config.SECRETS)
+        """
+        self.api_key = api_key or SECRETS.get('EODHD_API_KEY', '')
+        if not self.api_key:
+            logger.error("❌ EODHD_API_KEY non configurata!")
+            raise ValueError("EODHD_API_KEY è richiesta per il data fetching")
+        
+        self.base_url = CONFIG['EODHD_BASE_URL']
+        self.timeout = CONFIG['TIMEOUT']
+        self.max_retries = CONFIG['MAX_RETRIES']
+        
+        # Rate limiting settings
+        self.request_delay_min = CONFIG['REQUEST_DELAY_MIN']
+        self.request_delay_max = CONFIG['REQUEST_DELAY_MAX']
+        self.last_request_time = 0
+        
+        logger.info("✅ EODHD Client inizializzato")
     
-    # Validation
-    if not secrets['EODHD_API_KEY']:
-        print("⚠️ WARNING: EODHD_API_KEY non configurata!")
+    def _apply_rate_limit(self):
+        """Applica rate limiting tra richieste."""
+        elapsed = time.time() - self.last_request_time
+        delay = random.uniform(self.request_delay_min, self.request_delay_max)
+        
+        if elapsed < delay:
+            sleep_time = delay - elapsed
+            time.sleep(sleep_time)
+        
+        self.last_request_time = time.time()
     
-    return secrets
-
-# Carica secrets all'import del modulo
-SECRETS = load_secrets()
-
-# ============================================================================
-# UNIVERSO STRUMENTI FINANZIARI (29 TICKER)
-# ============================================================================
-
-UNIVERSE = {
-    # --- EQUITY INDICES (6) ---
-    "SPY": {
-        "name": "S&P 500 ETF",
-        "category": "Equity Index",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "QQQ": {
-        "name": "Nasdaq 100 ETF",
-        "category": "Equity Index",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "IWM": {
-        "name": "Russell 2000 ETF",
-        "category": "Equity Index",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "DIA": {
-        "name": "Dow Jones ETF",
-        "category": "Equity Index",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "EFA": {
-        "name": "EAFE Markets ETF",
-        "category": "Equity Index",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "EEM": {
-        "name": "Emerging Markets ETF",
-        "category": "Equity Index",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-
-    # --- SECTORS (9) ---
-    "XLK": {
-        "name": "Technology Select",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "XLF": {
-        "name": "Financial Select",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "XLE": {
-        "name": "Energy Select",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "XLV": {
-        "name": "Health Care Select",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "XLI": {
-        "name": "Industrial Select",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "XLY": {
-        "name": "Consumer Discretionary",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "XLP": {
-        "name": "Consumer Staples",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "XLU": {
-        "name": "Utilities Select",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "XLRE": {
-        "name": "Real Estate Select",
-        "category": "Sector",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-
-    # --- BONDS (4) ---
-    "TLT": {
-        "name": "20+ Year Treasury",
-        "category": "Bond",
-        "benchmark": "IEF",
-        "eodhd_exchange": "US"
-    },
-    "IEF": {
-        "name": "7-10 Year Treasury",
-        "category": "Bond",
-        "benchmark": "IEF",
-        "eodhd_exchange": "US"
-    },
-    "HYG": {
-        "name": "High Yield Corporate",
-        "category": "Bond",
-        "benchmark": "LQD",
-        "eodhd_exchange": "US"
-    },
-    "LQD": {
-        "name": "Investment Grade Corp",
-        "category": "Bond",
-        "benchmark": "IEF",
-        "eodhd_exchange": "US"
-    },
-
-    # --- COMMODITIES (4) ---
-    "GLD": {
-        "name": "Gold ETF",
-        "category": "Commodity",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "SLV": {
-        "name": "Silver ETF",
-        "category": "Commodity",
-        "benchmark": "GLD",
-        "eodhd_exchange": "US"
-    },
-    "USO": {
-        "name": "Oil Fund",
-        "category": "Commodity",
-        "benchmark": "SPY",
-        "eodhd_exchange": "US"
-    },
-    "UNG": {
-        "name": "Natural Gas Fund",
-        "category": "Commodity",
-        "benchmark": "USO",
-        "eodhd_exchange": "US"
-    },
-
-    # --- VOLATILITY (1) ---
-    "^VIX": {
-        "name": "CBOE Volatility Index",
-        "category": "Volatility",
-        "benchmark": "N/A",
-        "eodhd_exchange": "INDX"  # Index exchange su EODHD
-    },
-
-    # --- CURRENCIES (3) ---
-    "UUP": {
-        "name": "US Dollar Index ETF",
-        "category": "Currency",
-        "benchmark": "N/A",
-        "eodhd_exchange": "US"
-    },
-    "FXE": {
-        "name": "Euro ETF",
-        "category": "Currency",
-        "benchmark": "UUP",
-        "eodhd_exchange": "US"
-    },
-    "FXY": {
-        "name": "Yen ETF",
-        "category": "Currency",
-        "benchmark": "UUP",
-        "eodhd_exchange": "US"
-    },
-
-    # --- CRYPTO (2) ---
-    "BTC-USD": {
-        "name": "Bitcoin",
-        "category": "Crypto",
-        "benchmark": "SPY",
-        "eodhd_exchange": "CC"  # Cryptocurrency exchange
-    },
-    "ETH-USD": {
-        "name": "Ethereum",
-        "category": "Crypto",
-        "benchmark": "BTC-USD",
-        "eodhd_exchange": "CC"
-    },
-}
+    def _make_request(self, url: str, params: dict, attempt: int = 1) -> Optional[dict]:
+        """
+        Esegue richiesta HTTP con retry logic.
+        
+        Args:
+            url: URL endpoint
+            params: Query parameters
+            attempt: Numero tentativo corrente
+        
+        Returns:
+            JSON response o None se errore
+        """
+        try:
+            self._apply_rate_limit()
+            
+            response = requests.get(
+                url,
+                params=params,
+                timeout=self.timeout
+            )
+            
+            # Check HTTP status
+            if response.status_code == 200:
+                return response.json()
+            
+            elif response.status_code == 401:
+                logger.error(f"❌ 401 Unauthorized - Verifica EODHD_API_KEY")
+                return None
+            
+            elif response.status_code == 429:
+                # Rate limit exceeded
+                wait_time = 60 * attempt  # Exponential backoff
+                logger.warning(f"⚠️ Rate limit exceeded, wait {wait_time}s...")
+                time.sleep(wait_time)
+                
+                if attempt < self.max_retries:
+                    return self._make_request(url, params, attempt + 1)
+                return None
+            
+            elif response.status_code >= 500:
+                # Server error - retry
+                logger.warning(f"⚠️ Server error {response.status_code}, retry {attempt}/{self.max_retries}")
+                
+                if attempt < self.max_retries:
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                    return self._make_request(url, params, attempt + 1)
+                return None
+            
+            else:
+                logger.error(f"❌ HTTP {response.status_code}: {response.text[:200]}")
+                return None
+                
+        except requests.Timeout:
+            logger.warning(f"⚠️ Timeout, retry {attempt}/{self.max_retries}")
+            if attempt < self.max_retries:
+                time.sleep(2 ** attempt)
+                return self._make_request(url, params, attempt + 1)
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Errore richiesta: {str(e)}")
+            return None
+    
+    def get_eod_data(
+        self,
+        ticker: str,
+        exchange: str,
+        start_date: str,
+        end_date: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        Scarica dati End-of-Day da EODHD.
+        
+        Args:
+            ticker: Symbol (es. "SPY", "^VIX", "BTC-USD")
+            exchange: Exchange code (es. "US", "INDX", "CC")
+            start_date: Data inizio formato YYYY-MM-DD
+            end_date: Data fine formato YYYY-MM-DD
+        
+        Returns:
+            DataFrame con colonne [Date, Open, High, Low, Close, Volume, Adj Close]
+            o None se errore
+        """
+        # Costruisci symbol EODHD format
+        # Formato: TICKER.EXCHANGE (es. SPY.US, BTC-USD.CC)
+        symbol = f"{ticker}.{exchange}"
+        
+        url = f"{self.base_url}/eod/{symbol}"
+        
+        params = {
+            'api_token': self.api_key,
+            'from': start_date,
+            'to': end_date,
+            'fmt': 'json',
+            'period': 'd'  # Daily data
+        }
+        
+        logger.info(f"📥 Fetching {symbol} from {start_date} to {end_date}")
+        
+        data = self._make_request(url, params)
+        
+        if not data:
+            logger.error(f"❌ Nessun dato ricevuto per {symbol}")
+            return None
+        
+        # Converti in DataFrame
+        try:
+            df = pd.DataFrame(data)
+            
+            if df.empty:
+                logger.warning(f"⚠️ DataFrame vuoto per {symbol}")
+                return None
+            
+            # Rinomina colonne per compatibilità
+            column_mapping = {
+                'date': 'Date',
+                'open': 'Open',
+                'high': 'High',
+                'low': 'Low',
+                'close': 'Close',
+                'volume': 'Volume',
+                'adjusted_close': 'Adj Close'
+            }
+            
+            df = df.rename(columns=column_mapping)
+            
+            # Converti Date in datetime
+            df['Date'] = pd.to_datetime(df['Date'])
+            
+            # Assicurati che Adj Close esista (alcuni ticker potrebbero non averlo)
+            if 'Adj Close' not in df.columns:
+                df['Adj Close'] = df['Close']
+            
+            # Ordina per data crescente
+            df = df.sort_values('Date').reset_index(drop=True)
+            
+            # Validazione dati
+            if len(df) < CONFIG['MIN_REQUIRED_ROWS']:
+                logger.warning(
+                    f"⚠️ {symbol}: solo {len(df)} righe, "
+                    f"minimo richiesto {CONFIG['MIN_REQUIRED_ROWS']}"
+                )
+                return None
+            
+            logger.info(f"✅ {symbol}: {len(df)} righe scaricate")
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ Errore conversione DataFrame per {symbol}: {str(e)}")
+            return None
+    
+    def get_latest_quote(self, ticker: str, exchange: str) -> Optional[dict]:
+        """
+        Ottiene ultima quotazione real-time.
+        
+        Args:
+            ticker: Symbol
+            exchange: Exchange code
+        
+        Returns:
+            Dict con quote data o None
+        """
+        symbol = f"{ticker}.{exchange}"
+        url = f"{self.base_url}/real-time/{symbol}"
+        
+        params = {
+            'api_token': self.api_key,
+            'fmt': 'json'
+        }
+        
+        data = self._make_request(url, params)
+        return data
 
 # ============================================================================
-# PARAMETRI OPERATIVI
+# HIGH-LEVEL FETCHING FUNCTIONS
 # ============================================================================
 
-CONFIG = {
-    # --- DATA REQUIREMENTS ---
-    "DATA_LOOKBACK_DAYS": 400,       # Giorni storici da scaricare
-    "MIN_REQUIRED_ROWS": 250,        # Minimo righe per analisi valida
-    "CHART_LOOKBACK_DAYS": 252,      # Giorni da visualizzare nei grafici
-    
-    # --- EODHD API RATE LIMITING ---
-    # EODHD Free Tier: 20 req/sec, 100k/month
-    # EODHD Paid Tier: 1000 req/sec+
-    "REQUEST_DELAY_MIN": 0.5,        # Secondi tra richieste (conservative)
-    "REQUEST_DELAY_MAX": 1.5,        # Max delay per variabilità
-    "BATCH_SIZE": 5,                 # Ticker per batch
-    "BATCH_DELAY_MIN": 3.0,          # Pausa tra batch (sec)
-    "BATCH_DELAY_MAX": 5.0,          # Max pausa batch
-    "MAX_RETRIES": 3,                # Retry su errore
-    "TIMEOUT": 30,                   # Timeout richiesta HTTP (sec)
-    
-    # --- TECHNICAL INDICATORS PARAMETERS ---
-    # Simple Moving Averages
-    "SMA_PERIODS": [20, 50, 125, 200],
-    
-    # RSI (Relative Strength Index)
-    "RSI_PERIOD": 14,
-    "RSI_OVERBOUGHT": 70,
-    "RSI_OVERSOLD": 30,
-    
-    # ATR (Average True Range)
-    "ATR_PERIOD": 14,
-    
-    # Bollinger Bands
-    "BB_PERIOD": 20,
-    "BB_STD": 2.0,
-    
-    # MACD (Moving Average Convergence Divergence)
-    "MACD_FAST": 12,
-    "MACD_SLOW": 26,
-    "MACD_SIGNAL": 9,
-    
-    # ADX (Average Directional Index)
-    "ADX_PERIOD": 14,
-    "ADX_STRONG_TREND": 25,
-    
-    # Rate of Change
-    "ROC_PERIODS": [10, 20, 60],
-    
-    # Z-Score (Statistical)
-    "ZSCORE_PERIODS": [20, 50, 125],
-    
-    # Historical Volatility
-    "HVOL_PERIODS": [20, 60],
-    
-    # --- SCORING SYSTEM WEIGHTS ---
-    "WEIGHTS": {
-        "TREND": 0.30,           # Peso score trend
-        "MOMENTUM": 0.30,        # Peso score momentum
-        "VOLATILITY": 0.15,      # Peso score volatility (invertito)
-        "REL_STRENGTH": 0.25     # Peso relative strength vs benchmark
-    },
-    
-    # --- MARKET REGIME THRESHOLDS ---
-    "VIX_LOW": 15,              # VIX < 15 = regime bassa volatilità
-    "VIX_MEDIUM": 25,           # 15-25 = media volatilità
-    # VIX > 25 = alta volatilità
-    
-    # --- SIGNAL GENERATION ---
-    "SIGNAL_THRESHOLDS": {
-        "RSI_EXTREME_OB": 80,   # RSI extremely overbought
-        "RSI_EXTREME_OS": 20,   # RSI extremely oversold
-        "BB_BREAKOUT": 0.02,    # % oltre banda per segnale breakout
-        "VOLUME_SURGE": 2.0,    # Multiplo volume medio per surge
-        "GAP_THRESHOLD": 0.02,  # Gap % per segnale gap up/down
-    },
-    
-    # --- VISUAL STYLING (Kriterion Quant Colors) ---
-    "COLORS": {
-        "PRIMARY": ["#1a365d", "#2d3748", "#4a5568"],
-        "ACCENT_GREEN": "#38a169",
-        "ACCENT_RED": "#e53e3e",
-        "ACCENT_ORANGE": "#d69e2e",
-        "BG": "#f7fafc",
-        "CARD_BG": "#ffffff",
-        "SMA_50": "#3182ce",
-        "SMA_200": "#dd6b20",
-        "CANDLE_UP": "#38a169",
-        "CANDLE_DOWN": "#e53e3e",
-        # Score color mapping
-        "SCORE_EXCELLENT": "#38a169",  # Verde scuro (70-100)
-        "SCORE_GOOD": "#48bb78",       # Verde chiaro (55-70)
-        "SCORE_NEUTRAL": "#d69e2e",    # Arancio (40-55)
-        "SCORE_POOR": "#ed8936",       # Arancio scuro (25-40)
-        "SCORE_BAD": "#e53e3e",        # Rosso (0-25)
-    },
-    
-    # --- EODHD API ENDPOINTS ---
-    "EODHD_BASE_URL": "https://eodhistoricaldata.com/api",
-    "EODHD_EOD_ENDPOINT": "/eod",           # End-of-day data
-    "EODHD_REALTIME_ENDPOINT": "/real-time", # Real-time quote
-    
-    # --- TELEGRAM SETTINGS ---
-    "TELEGRAM_DAILY_HOUR": 8,      # Ora invio messaggio (08:00 IT)
-    "TELEGRAM_TIMEZONE": "Europe/Rome",
-    "TELEGRAM_MAX_MESSAGE_LENGTH": 4096,  # Telegram limit
-    
-    # --- CACHE SETTINGS ---
-    "CACHE_TTL_SECONDS": 3600,     # 1 ora cache Streamlit
-    
-    # --- EXPORT SETTINGS ---
-    "JSON_INDENT": 2,
-    "HTML_TEMPLATE_NAME": "dma_report_template.html",
-}
-
-# ============================================================================
-# VALIDAZIONE CONFIGURAZIONE
-# ============================================================================
-
-def validate_config() -> bool:
+def download_ticker_data(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    retries: int = 3
+) -> Optional[pd.DataFrame]:
     """
-    Valida la configurazione e l'universo strumenti.
-    
-    Returns:
-        True se configurazione valida, False altrimenti
-    """
-    errors = []
-    
-    # Check universo
-    if len(UNIVERSE) < 29:
-        errors.append(f"UNIVERSO deve contenere almeno 29 ticker, trovati {len(UNIVERSE)}")
-    
-    # Check pesi scoring sommano a 1.0
-    total_weight = sum(CONFIG['WEIGHTS'].values())
-    if abs(total_weight - 1.0) > 0.01:
-        errors.append(f"WEIGHTS devono sommare a 1.0, somma attuale: {total_weight}")
-    
-    # Check secrets critici
-    if not SECRETS.get('EODHD_API_KEY'):
-        errors.append("EODHD_API_KEY non configurata - richiesta per data fetching")
-    
-    # Log errori
-    if errors:
-        print("❌ ERRORI CONFIGURAZIONE:")
-        for err in errors:
-            print(f"   - {err}")
-        return False
-    
-    print("✅ Configurazione validata con successo")
-    return True
-
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
-
-def get_ticker_info(ticker: str) -> Dict[str, Any]:
-    """
-    Recupera informazioni per un ticker specifico.
+    Download dati per singolo ticker con retry.
     
     Args:
         ticker: Symbol ticker (es. "SPY")
+        start_date: Data inizio YYYY-MM-DD
+        end_date: Data fine YYYY-MM-DD
+        retries: Numero tentativi
     
     Returns:
-        Dict con info ticker o None se non trovato
+        DataFrame o None
     """
-    return UNIVERSE.get(ticker)
+    # Recupera info ticker da UNIVERSE
+    ticker_info = UNIVERSE.get(ticker)
+    if not ticker_info:
+        logger.error(f"❌ Ticker {ticker} non trovato in UNIVERSE")
+        return None
+    
+    exchange = ticker_info.get('eodhd_exchange', 'US')
+    
+    # Inizializza client
+    client = EODHDClient()
+    
+    # Scarica dati
+    df = client.get_eod_data(ticker, exchange, start_date, end_date)
+    
+    return df
 
-def get_tickers_by_category(category: str) -> list:
+def download_universe_data(
+    start_date: str,
+    end_date: str,
+    progress_callback=None
+) -> Dict[str, pd.DataFrame]:
     """
-    Filtra ticker per categoria.
+    Scarica dati per tutti i ticker dell'universo con batch processing.
     
     Args:
-        category: "Equity Index", "Sector", "Bond", etc.
+        start_date: Data inizio YYYY-MM-DD
+        end_date: Data fine YYYY-MM-DD
+        progress_callback: Funzione callback(current, total, ticker) per progress bar
     
     Returns:
-        Lista ticker della categoria
+        Dict {ticker: DataFrame}
     """
-    return [t for t, info in UNIVERSE.items() if info['category'] == category]
+    logger.info(f"🚀 Avvio download universo ({len(UNIVERSE)} ticker)")
+    
+    results = {}
+    failed = []
+    
+    client = EODHDClient()
+    
+    tickers = list(UNIVERSE.keys())
+    total_tickers = len(tickers)
+    
+    # Batch processing
+    batch_size = CONFIG['BATCH_SIZE']
+    batch_delay_min = CONFIG['BATCH_DELAY_MIN']
+    batch_delay_max = CONFIG['BATCH_DELAY_MAX']
+    
+    for i, ticker in enumerate(tickers, 1):
+        try:
+            # Progress callback
+            if progress_callback:
+                progress_callback(i, total_tickers, ticker)
+            
+            ticker_info = UNIVERSE[ticker]
+            exchange = ticker_info.get('eodhd_exchange', 'US')
+            
+            df = client.get_eod_data(ticker, exchange, start_date, end_date)
+            
+            if df is not None:
+                results[ticker] = df
+            else:
+                failed.append(ticker)
+            
+            # Batch delay (ogni N ticker)
+            if i % batch_size == 0 and i < total_tickers:
+                delay = random.uniform(batch_delay_min, batch_delay_max)
+                logger.info(f"⏸️ Batch delay: {delay:.1f}s (completati {i}/{total_tickers})")
+                time.sleep(delay)
+                
+        except Exception as e:
+            logger.error(f"❌ Errore download {ticker}: {str(e)}")
+            failed.append(ticker)
+    
+    # Summary
+    success_count = len(results)
+    fail_count = len(failed)
+    
+    logger.info("="*70)
+    logger.info(f"✅ Download completato: {success_count}/{total_tickers} ticker OK")
+    
+    if failed:
+        logger.warning(f"⚠️ Failed: {fail_count} ticker")
+        logger.warning(f"   {', '.join(failed)}")
+    
+    return results
 
-def get_all_categories() -> list:
-    """Ritorna lista di tutte le categorie presenti."""
-    return list(set(info['category'] for info in UNIVERSE.values()))
-
-def get_color_for_score(score: float) -> str:
+def get_date_range_for_analysis() -> Tuple[str, str]:
     """
-    Mappa score (0-100) a colore appropriato.
+    Calcola range date per analisi (oggi - LOOKBACK_DAYS fino a ieri).
+    
+    Returns:
+        Tuple (start_date, end_date) formato YYYY-MM-DD
+    """
+    # End date = ieri (per avere dati completi)
+    end_date = datetime.now() - timedelta(days=1)
+    
+    # Start date = end_date - lookback
+    lookback_days = CONFIG['DATA_LOOKBACK_DAYS']
+    start_date = end_date - timedelta(days=lookback_days)
+    
+    return (
+        start_date.strftime('%Y-%m-%d'),
+        end_date.strftime('%Y-%m-%d')
+    )
+
+def validate_dataframe(df: pd.DataFrame, ticker: str) -> bool:
+    """
+    Valida DataFrame scaricato.
     
     Args:
-        score: Score numerico 0-100
+        df: DataFrame da validare
+        ticker: Nome ticker (per logging)
     
     Returns:
-        Hex color code
+        True se valido, False altrimenti
     """
-    if score >= 70:
-        return CONFIG['COLORS']['SCORE_EXCELLENT']
-    elif score >= 55:
-        return CONFIG['COLORS']['SCORE_GOOD']
-    elif score >= 40:
-        return CONFIG['COLORS']['SCORE_NEUTRAL']
-    elif score >= 25:
-        return CONFIG['COLORS']['SCORE_POOR']
+    if df is None or df.empty:
+        logger.warning(f"⚠️ {ticker}: DataFrame vuoto")
+        return False
+    
+    required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    
+    if missing_cols:
+        logger.warning(f"⚠️ {ticker}: Colonne mancanti: {missing_cols}")
+        return False
+    
+    # Check NaN values
+    if df[['Open', 'High', 'Low', 'Close']].isnull().any().any():
+        logger.warning(f"⚠️ {ticker}: Contiene NaN nei prezzi")
+        return False
+    
+    # Check min rows
+    if len(df) < CONFIG['MIN_REQUIRED_ROWS']:
+        logger.warning(
+            f"⚠️ {ticker}: Solo {len(df)} righe, "
+            f"minimo {CONFIG['MIN_REQUIRED_ROWS']}"
+        )
+        return False
+    
+    return True
+
+def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pulisce e prepara DataFrame per analisi.
+    
+    Args:
+        df: DataFrame raw
+    
+    Returns:
+        DataFrame pulito
+    """
+    df = df.copy()
+    
+    # Remove NaN rows
+    df = df.dropna(subset=['Open', 'High', 'Low', 'Close'])
+    
+    # Ensure positive prices
+    price_cols = ['Open', 'High', 'Low', 'Close', 'Adj Close']
+    for col in price_cols:
+        if col in df.columns:
+            df = df[df[col] > 0]
+    
+    # Sort by date
+    df = df.sort_values('Date').reset_index(drop=True)
+    
+    # Convert Volume to numeric (handle strings)
+    if 'Volume' in df.columns:
+        df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce').fillna(0)
+    
+    return df
+
+# ============================================================================
+# CACHING UTILITIES (for Streamlit)
+# ============================================================================
+
+def get_cached_data_key() -> str:
+    """
+    Genera chiave unica per cache basata su data corrente.
+    Cache viene invalidata ogni giorno.
+    
+    Returns:
+        String key formato YYYY-MM-DD
+    """
+    return datetime.now().strftime('%Y-%m-%d')
+
+# ============================================================================
+# TEST FUNCTIONS
+# ============================================================================
+
+def test_connection() -> bool:
+    """
+    Testa connessione EODHD API.
+    
+    Returns:
+        True se connessione OK
+    """
+    logger.info("🔍 Test connessione EODHD API...")
+    
+    try:
+        client = EODHDClient()
+        
+        # Test con SPY (dovrebbe sempre funzionare)
+        end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
+        
+        df = client.get_eod_data('SPY', 'US', start_date, end_date)
+        
+        if df is not None and not df.empty:
+            logger.info(f"✅ Connessione OK - SPY: {len(df)} righe")
+            return True
+        else:
+            logger.error("❌ Connessione fallita - Nessun dato ricevuto")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Errore test connessione: {str(e)}")
+        return False
+
+def download_sample_data(ticker: str = "SPY") -> Optional[pd.DataFrame]:
+    """
+    Scarica dati sample per testing.
+    
+    Args:
+        ticker: Ticker da testare (default: SPY)
+    
+    Returns:
+        DataFrame o None
+    """
+    start_date, end_date = get_date_range_for_analysis()
+    
+    logger.info(f"📊 Download sample data: {ticker}")
+    logger.info(f"   Range: {start_date} → {end_date}")
+    
+    df = download_ticker_data(ticker, start_date, end_date)
+    
+    if df is not None:
+        logger.info(f"✅ Sample data downloaded: {len(df)} rows")
+        logger.info(f"   Date range: {df['Date'].min()} → {df['Date'].max()}")
+        logger.info(f"   Columns: {list(df.columns)}")
+        return df
     else:
-        return CONFIG['COLORS']['SCORE_BAD']
+        logger.error(f"❌ Failed to download sample data")
+        return None
 
 # ============================================================================
-# AUTO-VALIDATION ON IMPORT
-# ============================================================================
-
-if __name__ != "__main__":
-    # Valida automaticamente quando importato (ma non quando eseguito direttamente)
-    validate_config()
-
-# ============================================================================
-# TEST SCRIPT (esegui con: python config.py)
+# MAIN TEST SCRIPT
 # ============================================================================
 
 if __name__ == "__main__":
     print("="*70)
-    print("KRITERION QUANT - Configuration Test")
+    print("KRITERION QUANT - Data Fetcher Test")
     print("="*70)
     
-    # Test validazione
-    print("\n1. Validazione configurazione:")
-    validate_config()
+    # 1. Test connessione
+    print("\n1. Test Connessione EODHD:")
+    if test_connection():
+        print("   ✅ API Key valida e funzionante")
+    else:
+        print("   ❌ Problemi con API Key o connessione")
+        exit(1)
     
-    # Test secrets
-    print("\n2. Secrets Status:")
-    print(f"   EODHD_API_KEY: {'✅ Configurata' if SECRETS.get('EODHD_API_KEY') else '❌ Mancante'}")
-    print(f"   TELEGRAM_BOT_TOKEN: {'✅ Configurata' if SECRETS.get('TELEGRAM_BOT_TOKEN') else '⚠️ Opzionale'}")
-    print(f"   TELEGRAM_CHAT_ID: {'✅ Configurata' if SECRETS.get('TELEGRAM_CHAT_ID') else '⚠️ Opzionale'}")
+    # 2. Test download singolo ticker
+    print("\n2. Test Download Singolo Ticker (SPY):")
+    df_spy = download_sample_data("SPY")
+    if df_spy is not None:
+        print(f"   ✅ SPY downloaded: {len(df_spy)} righe")
+        print(f"\n   Prime 3 righe:")
+        print(df_spy.head(3).to_string())
     
-    # Test universo
-    print(f"\n3. Universo Strumenti:")
-    print(f"   Totale ticker: {len(UNIVERSE)}")
-    for cat in get_all_categories():
-        tickers = get_tickers_by_category(cat)
-        print(f"   - {cat}: {len(tickers)} ticker")
+    # 3. Test download ticker speciali
+    print("\n3. Test Ticker Speciali:")
     
-    # Test color mapping
-    print(f"\n4. Test Color Mapping:")
-    test_scores = [90, 65, 50, 35, 15]
-    for score in test_scores:
-        color = get_color_for_score(score)
-        print(f"   Score {score} → {color}")
+    # VIX (Index)
+    print("\n   a) VIX (Volatility Index):")
+    df_vix = download_ticker_data(
+        "^VIX",
+        (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+        (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    )
+    if df_vix is not None:
+        print(f"      ✅ VIX: {len(df_vix)} righe")
+    
+    # BTC (Crypto)
+    print("\n   b) BTC-USD (Cryptocurrency):")
+    df_btc = download_ticker_data(
+        "BTC-USD",
+        (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+        (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    )
+    if df_btc is not None:
+        print(f"      ✅ BTC-USD: {len(df_btc)} righe")
+    
+    # 4. Test batch download (sample 5 ticker)
+    print("\n4. Test Batch Download (sample 5 ticker):")
+    sample_tickers = ['SPY', 'QQQ', 'GLD', 'TLT', 'IWM']
+    
+    # Temporary universe override
+    import config
+    original_universe = config.UNIVERSE
+    config.UNIVERSE = {k: v for k, v in original_universe.items() if k in sample_tickers}
+    
+    start, end = get_date_range_for_analysis()
+    results = download_universe_data(start, end)
+    
+    print(f"\n   ✅ Downloaded: {len(results)}/{len(sample_tickers)} ticker")
+    for ticker, df in results.items():
+        print(f"      - {ticker}: {len(df)} righe")
+    
+    # Restore universe
+    config.UNIVERSE = original_universe
     
     print("\n" + "="*70)
-    print("✅ Test completato")
+    print("✅ Test completato con successo")
