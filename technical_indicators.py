@@ -14,6 +14,7 @@ Implementazione custom di tutti gli indicatori tecnici necessari:
 - Rate of Change (ROC)
 - Z-Score (Statistical)
 - Historical Volatility (HVol)
+- Price Levels & Pivot Points (Notebook Logic aligned)
 
 NOTE: Implementazioni custom per evitare dipendenza da TA-Lib
 ============================================================================
@@ -445,31 +446,57 @@ def calculate_volume_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # ============================================================================
-# SUPPORT/RESISTANCE LEVELS
+# SUPPORT/RESISTANCE LEVELS (Notebook Aligned)
 # ============================================================================
 
-def calculate_pivot_points(df: pd.DataFrame) -> pd.DataFrame:
+def calculate_price_levels(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcola Pivot Points classici (daily).
+    Calcola Livelli di Prezzo e Pivot Points.
+    Allineato alla logica del Notebook "Daily Market Analysis".
+    
+    Include:
+    - Livelli T-1 (Giornalieri): High, Low, Close (prev)
+    - Livelli Weekly Proxy: Rolling 5-day Max/Min
+    - Pivot Points Classici
     
     Args:
         df: DataFrame con colonne OHLC
     
     Returns:
-        DataFrame con pivot levels aggiunti
+        DataFrame con livelli aggiunti
     """
     df = df.copy()
     
-    # Pivot Point
-    df['Pivot'] = (df['High'] + df['Low'] + df['Close']) / 3
+    # 1. T-1 Levels (Giornalieri)
+    df['prev_day_high'] = df['High'].shift(1)
+    df['prev_day_low'] = df['Low'].shift(1)
+    df['prev_day_close'] = df['Close'].shift(1)
+    
+    # 2. Weekly Levels Proxy (Rolling 5gg shiftati di 1)
+    # Questo approssima i massimi/minimi della "settimana precedente" (o ultimi 5gg)
+    df['prev_week_high'] = df['High'].shift(1).rolling(window=5).max()
+    df['prev_week_low'] = df['Low'].shift(1).rolling(window=5).min()
+    
+    # 3. Pivot Points Classici
+    # PP = (H + L + C) / 3
+    # Nota: Usiamo i dati del giorno precedente per calcolare i pivot di "oggi"
+    pp = (df['prev_day_high'] + df['prev_day_low'] + df['prev_day_close']) / 3
+    df['Pivot'] = pp # Mantengo nome 'Pivot' per compatibilità
+    df['pivot_point'] = pp # Alias per compatibilità con notebook logic
     
     # Resistance levels
-    df['R1'] = 2 * df['Pivot'] - df['Low']
-    df['R2'] = df['Pivot'] + (df['High'] - df['Low'])
+    df['R1'] = (2 * pp) - df['prev_day_low']
+    df['R2'] = pp + (df['prev_day_high'] - df['prev_day_low'])
+    # Alias
+    df['resistance_1'] = df['R1']
+    df['resistance_2'] = df['R2']
     
     # Support levels
-    df['S1'] = 2 * df['Pivot'] - df['High']
-    df['S2'] = df['Pivot'] - (df['High'] - df['Low'])
+    df['S1'] = (2 * pp) - df['prev_day_high']
+    df['S2'] = pp - (df['prev_day_high'] - df['prev_day_low'])
+    # Alias
+    df['support_1'] = df['S1']
+    df['support_2'] = df['S2']
     
     return df
 
@@ -521,8 +548,8 @@ def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         if 'Volume' in df.columns and df['Volume'].sum() > 0:
             df = calculate_volume_indicators(df)
         
-        # --- SUPPORT/RESISTANCE ---
-        df = calculate_pivot_points(df)
+        # --- SUPPORT/RESISTANCE & LEVELS (Notebook Logic) ---
+        df = calculate_price_levels(df)
         
         logger.info(f"✅ Indicatori calcolati: {len(df.columns)} colonne totali")
         
@@ -694,7 +721,7 @@ if __name__ == "__main__":
     
     # 6. Visualizza ultime 5 righe con indicatori chiave
     print("\n6. Ultime 5 righe (indicatori chiave):")
-    key_cols = ['Date', 'Close', 'SMA_50', 'SMA_200', 'RSI', 'MACD', 'ADX', 'ATR_pct']
+    key_cols = ['Date', 'Close', 'SMA_50', 'SMA_200', 'RSI', 'MACD', 'ADX', 'ATR_pct', 'prev_week_high', 'Pivot']
     print(df_with_indicators[key_cols].tail().to_string())
     
     print("\n" + "="*70)
