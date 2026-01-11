@@ -22,57 +22,24 @@ from typing import Dict, Any
 
 def load_secrets() -> Dict[str, str]:
     """
-    Carica secrets da Streamlit secrets.toml oppure da variabili ambiente.
-    
-    Priority:
-    1. Streamlit secrets (st.secrets)
-    2. Environment variables
-    3. Empty string (no crash)
+    Carica secrets da Streamlit.
     
     Returns:
         Dict con EODHD_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
     """
-    secrets = {
-        'EODHD_API_KEY': '',
-        'TELEGRAM_BOT_TOKEN': '',
-        'TELEGRAM_CHAT_ID': ''
-    }
+    secrets = {}
     
-    # Try Streamlit secrets first
     try:
         import streamlit as st
-        
-        # st.secrets acts like a dict, access directly
-        try:
-            secrets['EODHD_API_KEY'] = st.secrets['EODHD_API_KEY']
-        except (KeyError, FileNotFoundError):
-            pass
-        
-        try:
-            secrets['TELEGRAM_BOT_TOKEN'] = st.secrets['TELEGRAM_BOT_TOKEN']
-        except (KeyError, FileNotFoundError):
-            pass
-        
-        try:
-            secrets['TELEGRAM_CHAT_ID'] = st.secrets['TELEGRAM_CHAT_ID']
-        except (KeyError, FileNotFoundError):
-            pass
-        
-        if secrets['EODHD_API_KEY']:
-            print("✅ Secrets caricati da Streamlit")
-    except Exception as e:
-        print(f"⚠️ Streamlit secrets non disponibili: {e}")
-    
-    # Fallback to environment variables
-    if not secrets['EODHD_API_KEY']:
+        # Accesso diretto - st.secrets è già un dict
+        secrets['EODHD_API_KEY'] = st.secrets.get('EODHD_API_KEY', os.getenv('EODHD_API_KEY', ''))
+        secrets['TELEGRAM_BOT_TOKEN'] = st.secrets.get('TELEGRAM_BOT_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', ''))
+        secrets['TELEGRAM_CHAT_ID'] = st.secrets.get('TELEGRAM_CHAT_ID', os.getenv('TELEGRAM_CHAT_ID', ''))
+    except:
+        # Fallback a env vars se non in Streamlit
         secrets['EODHD_API_KEY'] = os.getenv('EODHD_API_KEY', '')
-    if not secrets['TELEGRAM_BOT_TOKEN']:
         secrets['TELEGRAM_BOT_TOKEN'] = os.getenv('TELEGRAM_BOT_TOKEN', '')
-    if not secrets['TELEGRAM_CHAT_ID']:
         secrets['TELEGRAM_CHAT_ID'] = os.getenv('TELEGRAM_CHAT_ID', '')
-    
-    if secrets['EODHD_API_KEY'] and not any('Streamlit' in str(x) for x in sys.argv):
-        print("✅ Secrets caricati da variabili ambiente")
     
     # Validation
     if not secrets['EODHD_API_KEY']:
