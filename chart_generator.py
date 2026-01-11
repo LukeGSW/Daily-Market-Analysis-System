@@ -2,13 +2,13 @@
 """
 ============================================================================
 KRITERION QUANT - Daily Market Analysis System
-Chart Generator Module
+Chart Generator Module (Enhanced Visuals)
 ============================================================================
 Generazione grafici Plotly professionali con:
 - Candlestick charts
 - Overlay tecnici (SMA 50/200, Bollinger Bands)
 - Volume bars
-- Support/Resistance levels
+- LIVELLI CHIAVE (PWH, PWL, Pivot) visualizzati sul grafico
 - Stile branding Kriterion Quant
 ============================================================================
 """
@@ -38,10 +38,11 @@ def create_candlestick_chart(
     lookback_days: int = None,
     show_volume: bool = True,
     show_sma: bool = True,
-    show_bb: bool = True
+    show_bb: bool = True,
+    key_levels: Dict[str, float] = None  # NUOVO ARGOMENTO PER LIVELLI
 ) -> go.Figure:
     """
-    Crea grafico candlestick interattivo con overlay tecnici.
+    Crea grafico candlestick interattivo con overlay tecnici e livelli chiave.
     
     Args:
         df: DataFrame con OHLCV e indicatori
@@ -50,6 +51,7 @@ def create_candlestick_chart(
         show_volume: Mostra volume subplot
         show_sma: Mostra SMA 50/200
         show_bb: Mostra Bollinger Bands
+        key_levels: Dict con livelli prezzo (PWH, PWL, Pivot, etc.)
     
     Returns:
         Plotly Figure object
@@ -137,7 +139,7 @@ def create_candlestick_chart(
             )
     
     # --- BOLLINGER BANDS ---
-    if show_bb and all(col in df_plot.columns for col in ['BB_upper', 'BB_lower', 'BB_middle']):
+    if show_bb and all(col in df_plot.columns for col in ['BB_upper', 'BB_lower']):
         # Upper band
         fig.add_trace(
             go.Scatter(
@@ -160,11 +162,73 @@ def create_candlestick_chart(
                 name='BB Lower',
                 line=dict(color='rgba(128, 128, 128, 0.3)', width=1, dash='dash'),
                 fill='tonexty',
-                fillcolor='rgba(128, 128, 128, 0.1)',
+                fillcolor='rgba(128, 128, 128, 0.05)',
                 showlegend=True
             ),
             row=1, col=1
         )
+
+    # --- KEY LEVELS OVERLAY (Insight Visuali) ---
+    if key_levels:
+        # Prev Week High (Green Dot)
+        if 'prev_week_high' in key_levels and key_levels['prev_week_high'] > 0:
+            fig.add_hline(
+                y=key_levels['prev_week_high'], 
+                line_dash="dot", 
+                line_color="green", 
+                line_width=1, 
+                annotation_text="PWH", 
+                annotation_position="top right", 
+                row=1, col=1
+            )
+        
+        # Prev Week Low (Red Dot)
+        if 'prev_week_low' in key_levels and key_levels['prev_week_low'] > 0:
+            fig.add_hline(
+                y=key_levels['prev_week_low'], 
+                line_dash="dot", 
+                line_color="red", 
+                line_width=1, 
+                annotation_text="PWL", 
+                annotation_position="bottom right", 
+                row=1, col=1
+            )
+            
+        # Pivot Point (Blue Dash)
+        if 'pivot_point' in key_levels and key_levels['pivot_point'] > 0:
+            fig.add_hline(
+                y=key_levels['pivot_point'], 
+                line_dash="dash", 
+                line_color="blue", 
+                line_width=1, 
+                annotation_text="Pivot", 
+                annotation_position="right", 
+                row=1, col=1
+            )
+            
+        # Prev Day High (Light Green Dash)
+        if 'prev_day_high' in key_levels and key_levels['prev_day_high'] > 0:
+            fig.add_hline(
+                y=key_levels['prev_day_high'],
+                line_dash="dash",
+                line_color="rgba(0, 128, 0, 0.4)",
+                line_width=1,
+                annotation_text="PDH",
+                annotation_position="top left",
+                row=1, col=1
+            )
+
+        # Prev Day Low (Light Red Dash)
+        if 'prev_day_low' in key_levels and key_levels['prev_day_low'] > 0:
+            fig.add_hline(
+                y=key_levels['prev_day_low'],
+                line_dash="dash",
+                line_color="rgba(255, 0, 0, 0.4)",
+                line_width=1,
+                annotation_text="PDL",
+                annotation_position="bottom left",
+                row=1, col=1
+            )
     
     # --- VOLUME BARS ---
     if show_volume and 'Volume' in df_plot.columns:
@@ -240,19 +304,19 @@ def create_chart_with_indicators(
 ) -> go.Figure:
     """
     Crea grafico completo con tutti gli indicatori rilevanti.
-    
-    Versione avanzata con più informazioni rispetto a create_candlestick_chart.
-    
-    Args:
-        df: DataFrame con tutti gli indicatori calcolati
-        ticker: Symbol ticker
-        ticker_info: Info aggiuntive ticker (name, category, etc)
-    
-    Returns:
-        Plotly Figure object
     """
     if df.empty:
         return go.Figure()
+    
+    # Estrai livelli dall'ultima riga se presenti
+    last = df.iloc[-1]
+    k_levels = {
+        'prev_week_high': last.get('prev_week_high'),
+        'prev_week_low': last.get('prev_week_low'),
+        'prev_day_high': last.get('prev_day_high'),
+        'prev_day_low': last.get('prev_day_low'),
+        'pivot_point': last.get('pivot_point')
+    }
     
     # Usa candlestick base come foundation
     fig = create_candlestick_chart(
@@ -260,7 +324,8 @@ def create_chart_with_indicators(
         ticker,
         show_volume=True,
         show_sma=True,
-        show_bb=True
+        show_bb=True,
+        key_levels=k_levels
     )
     
     # Aggiungi info ticker al titolo se disponibile
@@ -287,13 +352,7 @@ def generate_all_charts(
 ) -> Dict[str, go.Figure]:
     """
     Genera grafici per tutti i ticker.
-    
-    Args:
-        processed_data: Dict {ticker: DataFrame con indicatori}
-        progress_callback: Funzione callback(current, total, ticker)
-    
-    Returns:
-        Dict {ticker: Plotly Figure}
+    Passa i Key Levels estratti dai dati per visualizzazione.
     """
     logger.info(f"📊 Generazione grafici per {len(processed_data)} ticker...")
     
@@ -305,7 +364,17 @@ def generate_all_charts(
             if progress_callback:
                 progress_callback(i, total, ticker)
             
-            fig = create_candlestick_chart(df, ticker)
+            # Estrai Key Levels dall'ultima riga
+            last = df.iloc[-1]
+            k_levels = {
+                'prev_week_high': last.get('prev_week_high'),
+                'prev_week_low': last.get('prev_week_low'),
+                'prev_day_high': last.get('prev_day_high'),
+                'prev_day_low': last.get('prev_day_low'),
+                'pivot_point': last.get('pivot_point')
+            }
+            
+            fig = create_candlestick_chart(df, ticker, key_levels=k_levels)
             charts[ticker] = fig
             
             if i % 10 == 0:
@@ -313,7 +382,6 @@ def generate_all_charts(
                 
         except Exception as e:
             logger.error(f"❌ Errore grafico {ticker}: {str(e)}")
-            # Create empty chart on error
             charts[ticker] = go.Figure()
     
     logger.info(f"✅ {len(charts)} grafici generati con successo")
@@ -323,12 +391,6 @@ def generate_all_charts(
 def generate_charts_html(charts: Dict[str, go.Figure]) -> Dict[str, str]:
     """
     Converte grafici Plotly in HTML strings per embedding.
-    
-    Args:
-        charts: Dict {ticker: Plotly Figure}
-    
-    Returns:
-        Dict {ticker: HTML string}
     """
     logger.info(f"🔄 Conversione {len(charts)} grafici in HTML...")
     
@@ -367,14 +429,6 @@ def create_comparison_chart(
 ) -> go.Figure:
     """
     Crea grafico comparativo tra multipli ticker.
-    
-    Args:
-        data_dict: Dict {ticker: DataFrame}
-        tickers: Lista ticker da comparare
-        normalize: Normalizza prezzi a 100 per confronto
-    
-    Returns:
-        Plotly Figure
     """
     fig = go.Figure()
     
@@ -436,12 +490,6 @@ def create_comparison_chart(
 def create_performance_heatmap(scores_dict: Dict[str, Dict[str, float]]) -> go.Figure:
     """
     Crea heatmap performance scores.
-    
-    Args:
-        scores_dict: Dict {ticker: {score_type: value}}
-    
-    Returns:
-        Plotly Figure heatmap
     """
     # Prepara dati per heatmap
     tickers = list(scores_dict.keys())
@@ -487,14 +535,6 @@ def save_chart_as_image(
 ):
     """
     Salva grafico Plotly come immagine PNG.
-    
-    NOTA: Richiede kaleido package installato.
-    
-    Args:
-        fig: Plotly Figure
-        filepath: Path file output (es. 'chart.png')
-        width: Larghezza pixel
-        height: Altezza pixel
     """
     try:
         fig.write_image(filepath, width=width, height=height)
@@ -510,11 +550,6 @@ def export_chart_html(
 ):
     """
     Esporta grafico come file HTML standalone.
-    
-    Args:
-        fig: Plotly Figure
-        filepath: Path file output (es. 'chart.html')
-        include_plotlyjs: Include Plotly.js nel file
     """
     try:
         fig.write_html(
@@ -559,58 +594,37 @@ if __name__ == "__main__":
     
     print(f"   ✅ Sample data: {len(df_sample)} righe")
     
-    # 2. Test candlestick chart
-    print("\n2. Creazione candlestick chart...")
+    # 2. Test candlestick chart con LIVELLI
+    print("\n2. Creazione candlestick chart con LIVELLI...")
+    
+    # Mock levels
+    mock_levels = {
+        'prev_week_high': prices[-1] * 1.05,
+        'prev_week_low': prices[-1] * 0.95,
+        'pivot_point': prices[-1],
+        'prev_day_high': prices[-1] * 1.02,
+        'prev_day_low': prices[-1] * 0.98
+    }
+    
     fig = create_candlestick_chart(
         df_sample,
         'TEST',
         show_volume=True,
         show_sma=True,
-        show_bb=True
+        show_bb=True,
+        key_levels=mock_levels  # Passaggio livelli
     )
     print(f"   ✅ Chart creato con successo")
     
     # 3. Test export HTML
     print("\n3. Export HTML...")
     try:
-        export_chart_html(fig, '/home/claude/test_chart.html')
-        print("   ✅ File salvato: /home/claude/test_chart.html")
+        export_chart_html(fig, 'test_chart_levels.html')
+        print("   ✅ File salvato: test_chart_levels.html")
     except Exception as e:
         print(f"   ⚠️ Export fallito: {str(e)}")
-    
-    # 4. Test batch generation
-    print("\n4. Test batch generation (3 ticker)...")
-    sample_data = {
-        'SPY': df_sample.copy(),
-        'QQQ': df_sample.copy(),
-        'GLD': df_sample.copy()
-    }
-    
-    charts = generate_all_charts(sample_data)
-    print(f"   ✅ {len(charts)} grafici generati")
-    
-    # 5. Test HTML conversion
-    print("\n5. Test HTML conversion...")
-    charts_html = generate_charts_html(charts)
-    print(f"   ✅ {len(charts_html)} grafici convertiti in HTML")
-    print(f"   Lunghezza HTML medio: {np.mean([len(h) for h in charts_html.values()]):.0f} chars")
-    
-    # 6. Test comparison chart
-    print("\n6. Test comparison chart...")
-    fig_comp = create_comparison_chart(sample_data, ['SPY', 'QQQ', 'GLD'], normalize=True)
-    print("   ✅ Comparison chart creato")
-    
-    # 7. Test heatmap
-    print("\n7. Test performance heatmap...")
-    sample_scores = {
-        'SPY': {'composite': 65, 'trend': 70, 'momentum': 60, 'volatility': 70, 'relative_strength': 0},
-        'QQQ': {'composite': 75, 'trend': 80, 'momentum': 70, 'volatility': 75, 'relative_strength': 80},
-        'GLD': {'composite': 55, 'trend': 50, 'momentum': 55, 'volatility': 85, 'relative_strength': 40},
-    }
-    fig_heat = create_performance_heatmap(sample_scores)
-    print("   ✅ Heatmap creato")
     
     print("\n" + "="*70)
     print("✅ Test completato con successo!")
     print("\nPer visualizzare il chart generato:")
-    print("   Apri: /home/claude/test_chart.html nel browser")
+    print("   Apri: test_chart_levels.html nel browser")
