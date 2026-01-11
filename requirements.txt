@@ -3,7 +3,7 @@
 # Requirements File
 # Python 3.9+
 # ============================================================================
-
+yfinance>=0.2.36
 # --- CORE DEPENDENCIES ---
 # Data manipulation and numerical computing
 pandas>=2.0.0
