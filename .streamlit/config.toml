@@ -59,11 +59,12 @@ maxMessageSize = 200
 enableWebsocketCompression = true
 
 # Run server in headless mode (no browser auto-open)
-# Utile per deployment
-headless = false
+# Utile per deployment - OBBLIGATORIO TRUE PER IL CLOUD
+headless = true
 
 # Server address (0.0.0.0 for all interfaces, localhost for local only)
-address = "localhost"
+# OBBLIGATORIO 0.0.0.0 PER IL CLOUD
+address = "0.0.0.0"
 
 # ============================================================================
 # BROWSER CONFIGURATION
@@ -123,36 +124,3 @@ messageFormat = "%(asctime)s %(levelname)s: %(message)s"
 
 # Enable color output in logs
 enableRich = true
-
-# ============================================================================
-# NOTES
-# ============================================================================
-# 
-# 1. COLORI BRAND KRITERION QUANT:
-#    - Primary (Green): #38a169
-#    - Background: #f7fafc
-#    - Text: #2d3748
-#    - Secondary BG: #ffffff
-#
-# 2. DEPLOYMENT:
-#    - Per Streamlit Cloud: questo file è auto-caricato
-#    - Per server custom: copia in .streamlit/config.toml
-#
-# 3. OVERRIDE:
-#    - Flags command line override questo file
-#    - Esempio: streamlit run app.py --server.port 8502
-#
-# 4. ENVIRONMENT VARIABLES:
-#    - Puoi override con env vars: STREAMLIT_SERVER_PORT=8502
-#    - Formato: STREAMLIT_<SECTION>_<KEY>=<VALUE>
-#
-# 5. SECRETS:
-#    - Secrets separati in secrets.toml (NON in questo file)
-#    - .streamlit/secrets.toml per API keys, tokens, etc.
-#
-# 6. TESTING:
-#    - Test config locale: streamlit run app.py
-#    - Verifica colori tema nell'interfaccia
-#    - Check console per warnings/errori
-#
-# ============================================================================
