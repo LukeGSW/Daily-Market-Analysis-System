@@ -84,18 +84,8 @@ serverPort = 8501
 # ============================================================================
 
 [runner]
-# Script runner to use (asyncio is default)
-# Options: "asyncio", "threaded"
-runner = "asyncio"
-
 # Magic commands enabled (e.g., variable inspection)
 magicEnabled = true
-
-# Install Tracer for better error messages
-installTracer = false
-
-# Fix matplotlib rendering issues
-fixMatplotlib = true
 
 # Post script run behavior
 # Options: "always", "on_success", "on_failure", "never"
@@ -119,9 +109,6 @@ toolbarMode = "auto"
 # Show error details
 showErrorDetails = true
 
-# Show traceback on errors
-showTracebackOnError = true
-
 # ============================================================================
 # LOGGER CONFIGURATION
 # ============================================================================
@@ -136,86 +123,6 @@ messageFormat = "%(asctime)s %(levelname)s: %(message)s"
 
 # Enable color output in logs
 enableRich = true
-
-# ============================================================================
-# DEPRECATION WARNINGS
-# ============================================================================
-
-[deprecation]
-# Show deprecation warnings
-showPyplotGlobalUse = false
-
-# Show file uploader encoding warning
-showfileUploaderEncoding = false
-
-# ============================================================================
-# MAPBOX CONFIGURATION (if using maps)
-# ============================================================================
-
-# [mapbox]
-# Mapbox token (uncomment and add if using st.map with Mapbox)
-# token = "your_mapbox_token_here"
-
-# ============================================================================
-# GLOBAL CONFIGURATION
-# ============================================================================
-
-[global]
-# Development mode (enables hot-reloading)
-developmentMode = false
-
-# Show warning when using experimental features
-showWarningOnDirectExecution = true
-
-# Data frame serialization
-# Options: "legacy", "arrow"
-dataFrameSerialization = "arrow"
-
-# ============================================================================
-# UI CONFIGURATION
-# ============================================================================
-
-[ui]
-# Hide the hamburger menu (top-right)
-hideTopBar = false
-
-# Hide the footer "Made with Streamlit"
-hideSidebarNav = false
-
-# ============================================================================
-# CUSTOM CSS (via theme)
-# ============================================================================
-# Nota: Per CSS personalizzato avanzato, usa st.markdown() con unsafe_allow_html
-# Esempio in app.py:
-# 
-# st.markdown("""
-# <style>
-#     .stApp {
-#         max-width: 1400px;
-#         margin: 0 auto;
-#     }
-#     h1 {
-#         color: #1a365d;
-#         font-weight: 800;
-#     }
-# </style>
-# """, unsafe_allow_html=True)
-
-# ============================================================================
-# PERFORMANCE TUNING
-# ============================================================================
-
-# [runner]
-# Faster refresh durante development
-# fastReruns = true
-
-# [server]
-# Abilita compression per payload grandi
-# enableWebsocketCompression = true
-
-# [client]
-# Timeout per connessione WebSocket (secondi)
-# timeout = 30
 
 # ============================================================================
 # NOTES
