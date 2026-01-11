@@ -415,9 +415,15 @@ def render_instrument_detail(ticker, data, processed_df):
         st.warning(f"⚠️ **Active Signals:** {', '.join(signals)}")
     
     # Chart
+    # Chart
     if processed_df is not None and not processed_df.empty:
         try:
-            fig = create_candlestick_chart(processed_df, ticker)
+            # Estrai key_levels dal dizionario dati per passarli al grafico
+            key_levels = data.get('key_levels', {})
+            
+            # Chiama la nuova versione che accetta key_levels
+            fig = create_candlestick_chart(processed_df, ticker, key_levels=key_levels)
+            
             st.plotly_chart(fig, width="stretch")
         except Exception as e:
             st.error(f"Error generating chart: {str(e)}")
