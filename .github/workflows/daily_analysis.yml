@@ -1,0 +1,293 @@
+name: Daily Market Analysis
+
+# ============================================================================
+# TRIGGER CONFIGURATION
+# ============================================================================
+
+on:
+  # Scheduled execution: Every day at 07:00 UTC (08:00 IT)
+  schedule:
+    - cron: '0 7 * * *'  # Runs at 07:00 UTC = 08:00 Italy time (no DST adjustment needed)
+  
+  # Manual trigger via GitHub UI (workflow_dispatch)
+  workflow_dispatch:
+    inputs:
+      skip_telegram:
+        description: 'Skip Telegram notification'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      commit_results:
+        description: 'Commit results to repository'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+# ============================================================================
+# ENVIRONMENT VARIABLES
+# ============================================================================
+
+env:
+  PYTHON_VERSION: '3.9'
+  OUTPUT_DIR: './data'
+
+# ============================================================================
+# JOBS
+# ============================================================================
+
+jobs:
+  daily-analysis:
+    name: Run Daily Market Analysis
+    runs-on: ubuntu-latest
+    
+    # Timeout after 30 minutes (safety)
+    timeout-minutes: 30
+    
+    steps:
+      # ----------------------------------------------------------------------
+      # STEP 1: Checkout Repository
+      # ----------------------------------------------------------------------
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history for potential git commits
+          fetch-depth: 0
+      
+      # ----------------------------------------------------------------------
+      # STEP 2: Setup Python
+      # ----------------------------------------------------------------------
+      - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'  # Cache pip dependencies
+      
+      # ----------------------------------------------------------------------
+      # STEP 3: Install Dependencies
+      # ----------------------------------------------------------------------
+      - name: 📦 Install Dependencies
+        run: |
+          echo "Installing Python dependencies..."
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "✅ Dependencies installed successfully"
+      
+      # ----------------------------------------------------------------------
+      # STEP 4: Verify Configuration
+      # ----------------------------------------------------------------------
+      - name: 🔍 Verify Configuration
+        run: |
+          echo "Verifying environment configuration..."
+          python -c "
+          from config import SECRETS, validate_config
+          print('EODHD_API_KEY:', '✅ Configured' if SECRETS.get('EODHD_API_KEY') else '❌ Missing')
+          print('TELEGRAM_BOT_TOKEN:', '✅ Configured' if SECRETS.get('TELEGRAM_BOT_TOKEN') else '⚠️ Optional')
+          print('TELEGRAM_CHAT_ID:', '✅ Configured' if SECRETS.get('TELEGRAM_CHAT_ID') else '⚠️ Optional')
+          validate_config()
+          "
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      
+      # ----------------------------------------------------------------------
+      # STEP 5: Create Output Directory
+      # ----------------------------------------------------------------------
+      - name: 📁 Create Output Directory
+        run: |
+          mkdir -p ${{ env.OUTPUT_DIR }}
+          echo "✅ Output directory created: ${{ env.OUTPUT_DIR }}"
+      
+      # ----------------------------------------------------------------------
+      # STEP 6: Run Daily Analysis
+      # ----------------------------------------------------------------------
+      - name: 🚀 Run Daily Analysis
+        id: analysis
+        run: |
+          echo "Starting daily market analysis..."
+          
+          # Build command with options
+          CMD="python scheduler.py"
+          
+          # Add flags based on workflow inputs
+          if [ "${{ github.event.inputs.skip_telegram }}" = "true" ]; then
+            CMD="$CMD --no-telegram"
+            echo "⏭️  Telegram notification disabled"
+          fi
+          
+          if [ "${{ github.event.inputs.commit_results }}" = "true" ]; then
+            CMD="$CMD --commit"
+            echo "📤 Git commit enabled"
+          fi
+          
+          echo "Executing: $CMD"
+          $CMD
+          
+          # Capture exit code
+          EXIT_CODE=$?
+          
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ Analysis completed successfully"
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Analysis failed with exit code $EXIT_CODE"
+            echo "status=failure" >> $GITHUB_OUTPUT
+            exit $EXIT_CODE
+          fi
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SAVE_REPORTS: 'true'
+          SEND_TELEGRAM: ${{ github.event.inputs.skip_telegram != 'true' }}
+          COMMIT_RESULTS: ${{ github.event.inputs.commit_results }}
+        continue-on-error: false
+      
+      # ----------------------------------------------------------------------
+      # STEP 7: Upload Reports as Artifacts
+      # ----------------------------------------------------------------------
+      - name: 📤 Upload Reports
+        if: always()  # Upload even if analysis fails (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-reports-${{ github.run_number }}
+          path: |
+            ${{ env.OUTPUT_DIR }}/*.json
+            ${{ env.OUTPUT_DIR }}/*.html
+          retention-days: 90  # Keep for 90 days
+          if-no-files-found: warn
+      
+      # ----------------------------------------------------------------------
+      # STEP 8: Upload Log File
+      # ----------------------------------------------------------------------
+      - name: 📋 Upload Log File
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-log-${{ github.run_number }}
+          path: dma_scheduler.log
+          retention-days: 30
+          if-no-files-found: warn
+      
+      # ----------------------------------------------------------------------
+      # STEP 9: Commit Results (if enabled)
+      # ----------------------------------------------------------------------
+      - name: 📤 Commit Results to Repository
+        if: github.event.inputs.commit_results == 'true' && steps.analysis.outputs.status == 'success'
+        run: |
+          # Configure git
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Add generated files
+          git add ${{ env.OUTPUT_DIR }}
+          
+          # Check if there are changes
+          if git diff --cached --quiet; then
+            echo "⏭️  No changes to commit"
+          else
+            # Commit
+            DATE=$(date +%Y-%m-%d)
+            git commit -m "Daily Market Analysis - $DATE [automated]"
+            
+            # Push
+            git push
+            echo "✅ Results committed successfully"
+          fi
+      
+      # ----------------------------------------------------------------------
+      # STEP 10: Generate Summary
+      # ----------------------------------------------------------------------
+      - name: 📊 Generate Job Summary
+        if: always()
+        run: |
+          echo "# Daily Market Analysis Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date +%Y-%m-%d)" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $(date +%H:%M:%S) UTC" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ steps.analysis.outputs.status || 'Unknown' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Add configuration info
+          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Python Version: ${{ env.PYTHON_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Skip Telegram: ${{ github.event.inputs.skip_telegram || 'false' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit Results: ${{ github.event.inputs.commit_results || 'false' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check if reports were generated
+          if [ -d "${{ env.OUTPUT_DIR }}" ] && [ "$(ls -A ${{ env.OUTPUT_DIR }})" ]; then
+            echo "## Generated Reports" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            ls -lh ${{ env.OUTPUT_DIR }} >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No reports found in output directory" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*Generated by Kriterion Quant DMA System*" >> $GITHUB_STEP_SUMMARY
+      
+      # ----------------------------------------------------------------------
+      # STEP 11: Cleanup on Failure (Optional)
+      # ----------------------------------------------------------------------
+      - name: 🧹 Cleanup on Failure
+        if: failure()
+        run: |
+          echo "Cleaning up after failure..."
+          # Add any cleanup tasks here if needed
+          echo "✅ Cleanup completed"
+
+# ============================================================================
+# WORKFLOW PERMISSIONS
+# ============================================================================
+
+# Permissions needed for the workflow
+permissions:
+  contents: write  # For committing results
+  actions: read    # For artifact upload
+  
+# ============================================================================
+# CONCURRENCY
+# ============================================================================
+
+# Prevent multiple runs at the same time
+concurrency:
+  group: daily-analysis
+  cancel-in-progress: false  # Don't cancel running analysis
+
+# ============================================================================
+# NOTES
+# ============================================================================
+# 
+# Required Secrets (set in GitHub Repository Settings):
+# - EODHD_API_KEY: API key for EODHD data source
+# - TELEGRAM_BOT_TOKEN: Telegram bot token (optional)
+# - TELEGRAM_CHAT_ID: Telegram chat ID (optional)
+#
+# Schedule:
+# - Runs daily at 07:00 UTC (08:00 Italy time)
+# - Cron expression: '0 7 * * *'
+# 
+# Manual Execution:
+# - Go to Actions tab → Daily Market Analysis → Run workflow
+# - Choose options for skip_telegram and commit_results
+#
+# Artifacts:
+# - Reports retained for 90 days
+# - Logs retained for 30 days
+# - Download from Actions tab → Workflow run → Artifacts
+#
+# Monitoring:
+# - Check Actions tab for execution status
+# - Telegram receives daily summary if configured
+# - Email notifications can be configured in GitHub settings
+#
+# ============================================================================
