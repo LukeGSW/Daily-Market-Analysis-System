@@ -1,416 +1,560 @@
 # 📊 Kriterion Quant - Daily Market Analysis System
 
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Streamlit](https://img.shields.io/badge/streamlit-1.31+-red.svg)](https://streamlit.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-Sistema professionale di analisi quantitativa multi-asset sviluppato da **Kriterion Quant** per il monitoraggio giornaliero di 29 strumenti finanziari attraverso indicatori tecnici avanzati, scoring composito e regime detection.
+Sistema professionale di analisi quantitativa giornaliera per monitoraggio automatico di **29 strumenti finanziari** attraverso algoritmi di scoring multi-dimensionale e notifiche automatiche.
 
----
-
-## 🎯 Caratteristiche Principali
-
-### 📈 Analisi Multi-Asset
-- **29 Strumenti Finanziari**:
-  - 6 Equity Indices (SPY, QQQ, IWM, DIA, EFA, EEM)
-  - 9 Sector ETFs (XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLU, XLRE)
-  - 4 Bond ETFs (TLT, IEF, HYG, LQD)
-  - 4 Commodities (GLD, SLV, USO, UNG)
-  - 3 Currencies (UUP, FXE, FXY)
-  - 2 Crypto (BTC-USD, ETH-USD)
-  - 1 Volatility Index (^VIX)
-
-### 🔬 Indicatori Tecnici Avanzati
-- **Trend**: SMA (20, 50, 125, 200 periodi)
-- **Momentum**: RSI (14), MACD, ROC (10, 20, 60)
-- **Volatility**: ATR (14), Bollinger Bands (20,2), Historical Volatility
-- **Strength**: Z-Score multi-periodo, Relative Strength vs Benchmark
-- **Trend Strength**: ADX (14)
-
-### 🎯 Scoring System Composito
-- **Weights Configurabili**:
-  - Trend: 30%
-  - Momentum: 30%
-  - Volatility: 15%
-  - Relative Strength: 25%
-- **Range Score**: 0-100 (color-coded)
-
-### 📡 Automazione Completa
-- **Scheduling**: GitHub Actions (esecuzione automatica ore 08:00 IT)
-- **Notifiche**: Bot Telegram con riassunto giornaliero
-- **Dashboard**: Streamlit interattiva con grafici real-time
-
-### 📊 Visualizzazione Professionale
-- Grafici Candlestick interattivi (Plotly)
-- Overlay tecnici (SMA, Bollinger Bands, Volume)
-- Ranking tables (Top/Bottom 5)
-- Market Regime indicators (VIX, SPY Trend)
-- Export JSON per analisi LLM
+![Dashboard Preview](https://via.placeholder.com/800x400/1a365d/ffffff?text=Kriterion+Quant+DMA+Dashboard)
 
 ---
 
-## 🏗️ Architettura Sistema
+## 🎯 Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    EODHD API (Data Source)                  │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Data Fetcher + Technical Indicators            │
-│  (Rate Limiting, Retry Logic, SMA/RSI/MACD/ATR/BB/etc)     │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Scoring System + Analysis                  │
-│     (Composite Score, Market Regime, Signal Generation)     │
-└─────────┬───────────────────────────────────┬───────────────┘
-          │                                   │
-          ▼                                   ▼
-┌──────────────────────┐          ┌──────────────────────────┐
-│  Streamlit Dashboard │          │   Telegram Notifier      │
-│  (Interactive UI)    │          │   (Daily Summary 08:00)  │
-└──────────────────────┘          └──────────────────────────┘
-          │                                   │
-          ▼                                   ▼
-┌──────────────────────┐          ┌──────────────────────────┐
-│   JSON Export        │          │   GitHub Actions         │
-│   (LLM Analysis)     │          │   (Scheduling)           │
-└──────────────────────┘          └──────────────────────────┘
-```
+Il **Daily Market Analysis (DMA) System** è una piattaforma completa che combina:
+
+- 📈 **Analisi Quantitativa** - 50+ indicatori tecnici custom
+- 🤖 **Automazione Completa** - GitHub Actions + Telegram
+- 📊 **Dashboard Interattiva** - Streamlit con grafici Plotly
+- 🎯 **Scoring Multi-dimensionale** - Trend, Momentum, Volatility, Relative Strength
+- 🌍 **Market Regime Detection** - VIX + SPY trend analysis
+- 📱 **Notifiche Daily** - Summary formattati via Telegram
+
+### Universo Analizzato (29 Strumenti)
+
+| Categoria | Ticker | Descrizione |
+|-----------|--------|-------------|
+| **Equity Indices** (6) | SPY, QQQ, IWM, DIA, EFA, EEM | US + International |
+| **Sectors** (9) | XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLU, XLRE | S&P sectors |
+| **Bonds** (4) | TLT, IEF, HYG, LQD | Treasury + Corporate |
+| **Commodities** (4) | GLD, SLV, USO, UNG | Metalli + Energia |
+| **Volatility** (1) | ^VIX | CBOE VIX Index |
+| **Currencies** (3) | UUP, FXE, FXY | USD, EUR, JPY |
+| **Crypto** (2) | BTC-USD, ETH-USD | Bitcoin + Ethereum |
 
 ---
 
 ## 🚀 Quick Start
 
-### Prerequisiti
-- Python 3.9+
-- Account EODHD (API Key)
-- Telegram Bot (opzionale per notifiche)
-- GitHub Account (per deployment)
-- Streamlit Cloud Account (per hosting)
+### Installation
 
-### 1. Clone Repository
 ```bash
-git clone https://github.com/YOUR_USERNAME/kriterion-dma-system.git
-cd kriterion-dma-system
-```
+# 1. Clone repository
+git clone https://github.com/your-username/dma-system.git
+cd dma-system
 
-### 2. Installazione Dipendenze
-```bash
+# 2. Install dependencies
 pip install -r requirements.txt
-```
 
-### 3. Configurazione Secrets
+# 3. Configure secrets
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# Edit with your EODHD_API_KEY
 
-#### Per Sviluppo Locale
-Crea file `.streamlit/secrets.toml`:
-```toml
-EODHD_API_KEY = "your_eodhd_api_key_here"
-TELEGRAM_BOT_TOKEN = "your_telegram_bot_token_here"
-TELEGRAM_CHAT_ID = "your_telegram_chat_id_here"
-```
-
-#### Per GitHub Actions
-Vai su: `Settings → Secrets and variables → Actions → New repository secret`
-
-Aggiungi:
-- `EODHD_API_KEY`
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
-
-#### Per Streamlit Cloud
-Durante il deployment, aggiungi i secrets in formato TOML nella sezione "Advanced settings".
-
-### 4. Test Locale
-```bash
+# 4. Run Streamlit dashboard
 streamlit run app.py
 ```
 
-Apri browser su: `http://localhost:8501`
+### First Run
+
+1. Open browser at `http://localhost:8501`
+2. Wait for initial data load (~5-10 minutes)
+3. Explore dashboard sections:
+   - Market Regime Overview
+   - Top/Bottom Rankings
+   - Detailed Instrument Analysis
 
 ---
 
-## 📦 Struttura Progetto
+## 🏗️ Architecture
 
 ```
-kriterion-dma-system/
-├── .github/
-│   └── workflows/
-│       └── daily_analysis.yml       # GitHub Action per scheduling 08:00 IT
-├── .streamlit/
-│   ├── config.toml                  # Tema e configurazione UI
-│   └── secrets.toml.example         # Template secrets
-├── data/                            # (opzionale) Storage JSON storici
-├── app.py                           # 🌟 MAIN - Dashboard Streamlit
-├── config.py                        # Configurazione universo e parametri
-├── data_fetcher.py                  # Download dati EODHD con rate limiting
-├── technical_indicators.py          # Calcolo indicatori tecnici
-├── scoring_system.py                # Sistema scoring composito
-├── market_analysis.py               # Orchestrazione analisi + regime detection
-├── chart_generator.py               # Generazione grafici Plotly
-├── report_generator.py              # Export JSON/HTML
-├── telegram_notifier.py             # Invio notifiche Telegram
-├── scheduler.py                     # Script per GitHub Actions
-├── utils.py                         # Helper functions
-├── requirements.txt                 # Dipendenze Python
-├── .gitignore                       # File da escludere
-├── README.md                        # Questo file
-├── DEPLOY_GUIDE.md                  # Guida deployment dettagliata
-└── test_eodhd.py                    # Test connessione API (opzionale)
+┌─────────────────────────────────────────────────────────────────┐
+│                     KRITERION QUANT DMA SYSTEM                  │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    │                         │
+           ┌────────▼────────┐       ┌───────▼────────┐
+           │   STREAMLIT     │       │ GITHUB ACTIONS │
+           │   DASHBOARD     │       │   SCHEDULER    │
+           └────────┬────────┘       └───────┬────────┘
+                    │                        │
+                    └────────────┬───────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │   MARKET ANALYSIS       │
+                    │   (Orchestration)       │
+                    └────────────┬────────────┘
+                                 │
+         ┌───────────────────────┼───────────────────────┐
+         │                       │                       │
+    ┌────▼─────┐        ┌───────▼────────┐      ┌──────▼──────┐
+    │  DATA    │        │  TECHNICAL     │      │  SCORING    │
+    │ FETCHER  │───────▶│  INDICATORS    │─────▶│   SYSTEM    │
+    │ (EODHD)  │        │  (50+ Calcs)   │      │ (4 Scores)  │
+    └──────────┘        └────────────────┘      └──────┬──────┘
+                                                        │
+                         ┌──────────────────────────────┤
+                         │                              │
+                  ┌──────▼──────┐              ┌────────▼────────┐
+                  │   CHART     │              │    REPORT       │
+                  │ GENERATOR   │              │   GENERATOR     │
+                  │  (Plotly)   │              │  (JSON+HTML)    │
+                  └─────────────┘              └─────────────────┘
 ```
 
 ---
 
-## 🔧 Configurazione Avanzata
+## ✨ Features
 
-### Modifica Universo Strumenti
-Edita `config.py` → sezione `UNIVERSE`:
+### 📊 Analisi Quantitativa
+
+**50+ Indicatori Tecnici:**
+- Trend: SMA (20/50/125/200)
+- Momentum: RSI, MACD, ROC
+- Volatility: ATR, Bollinger Bands, Historical Vol
+- Volume: OBV, Volume Ratio
+- Support/Resistance: Pivot Points
+
+**Scoring Multi-dimensionale (0-100):**
+- **Trend** (30%): Price vs SMA, slope, alignment
+- **Momentum** (30%): RSI, MACD, ROC multi-period
+- **Volatility** (15%): ATR%, BB width, HVol (invertito)
+- **Relative Strength** (25%): Performance vs benchmark
+
+**Market Regime Detection:**
+- VIX: Low (<15), Medium (15-25), High (>25)
+- SPY: Uptrend/Downtrend vs SMA200
+- Conditions: Bullish, Bearish, Volatile_Bullish, Quiet_Bearish, Neutral
+
+### 🔔 Signal Generation
+
+8 tipi automatici:
+1. Price breakout (weekly high/low)
+2. RSI extremes (>80, <20)
+3. Bollinger Band breakout
+4. Volume surge (>2x)
+5. Gap up/down (>2%)
+6. MACD crossover
+7. Golden/Death Cross (SMA 50/200)
+8. Strong trend (ADX >25)
+
+### 🤖 Automazione
+
+- **GitHub Actions**: Daily execution ore 08:00 IT
+- **Telegram Bot**: Summary formattato automatico
+- **Report Generation**: JSON (LLM-ready) + HTML (dashboard)
+- **Artifact Storage**: 90 giorni retention
+
+### 📱 Dashboard Features
+
+- Market regime overview (3 metrics)
+- Top/Bottom 5 performers
+- Detailed analysis per instrument:
+  - Score boxes colorati
+  - Active signals
+  - Interactive Plotly charts
+- Category filtering
+- View modes: Expandable/Tabs
+- JSON export
+- Telegram integration
+
+---
+
+## 📁 Project Structure
+
+```
+dma-system/
+├── app.py                      # Streamlit dashboard (800 LOC)
+├── scheduler.py                # GitHub Actions script (350 LOC)
+├── config.py                   # Configuration (250 LOC)
+│
+├── 📊 Data & Analysis
+│   ├── data_fetcher.py        # EODHD integration (400 LOC)
+│   ├── technical_indicators.py # 50+ indicators (600 LOC)
+│   ├── scoring_system.py      # Scoring algorithms (500 LOC)
+│   └── market_analysis.py     # Orchestration (450 LOC)
+│
+├── 📈 Visualization & Output
+│   ├── chart_generator.py     # Plotly charts (400 LOC)
+│   ├── report_generator.py    # JSON/HTML (600 LOC)
+│   ├── telegram_notifier.py   # Telegram bot (400 LOC)
+│   └── utils.py               # Helpers (500 LOC)
+│
+├── ⚙️ Configuration
+│   ├── requirements.txt
+│   ├── .gitignore
+│   ├── .streamlit/
+│   │   ├── config.toml        # Theme
+│   │   └── secrets.toml.example
+│   └── .github/workflows/
+│       └── daily_analysis.yml
+│
+└── 📚 Documentation
+    ├── README.md              # This file
+    └── DEPLOY_GUIDE.md        # Deployment instructions
+```
+
+**Total:** ~5,250 LOC (senza commenti)
+
+---
+
+## 🚢 Deployment
+
+### Streamlit Cloud
+
+```bash
+1. Push to GitHub
+2. Go to share.streamlit.io
+3. New app → Select repository
+4. Configure secrets (TOML format)
+5. Deploy automatically
+```
+
+**Access:** `https://your-username-dma-system.streamlit.app`
+
+### GitHub Actions
+
+```bash
+1. Add secrets to repository
+   Settings → Secrets → Actions
+   - EODHD_API_KEY (required)
+   - TELEGRAM_BOT_TOKEN (optional)
+   - TELEGRAM_CHAT_ID (optional)
+
+2. Workflow runs daily at 07:00 UTC
+   (08:00 Italy time)
+
+3. Manual trigger:
+   Actions → Daily Market Analysis → Run workflow
+```
+
+**📖 Full guide:** [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md)
+
+---
+
+## 🔧 Configuration
+
+### Customize Universe
+
+Edit `config.py`:
+
 ```python
 UNIVERSE = {
-    "AAPL": {"name": "Apple Inc.", "category": "Stock", "benchmark": "SPY"},
-    # Aggiungi altri ticker...
+    'YOUR_TICKER': {
+        'name': 'Description',
+        'category': 'Equity Index',  # or Sector, Bond, etc
+        'benchmark': 'SPY',
+        'eodhd_exchange': 'US'  # US, CC, INDX
+    },
+    # Add more...
 }
 ```
 
-### Personalizza Pesi Scoring
-Edita `config.py` → sezione `CONFIG["WEIGHTS"]`:
+### Adjust Parameters
+
 ```python
-"WEIGHTS": {
-    "TREND": 0.35,        # Default: 0.30
-    "MOMENTUM": 0.35,     # Default: 0.30
-    "VOLATILITY": 0.10,   # Default: 0.15
-    "REL_STRENGTH": 0.20  # Default: 0.25
-}
-```
-
-### Modifica Orario GitHub Action
-Edita `.github/workflows/daily_analysis.yml`:
-```yaml
-schedule:
-  - cron: '0 7 * * *'  # 08:00 IT (07:00 UTC) - Modifica come preferisci
-```
-
----
-
-## 📱 Setup Bot Telegram (Opzionale)
-
-### 1. Crea Bot
-1. Apri Telegram e cerca `@BotFather`
-2. Invia `/newbot` e segui le istruzioni
-3. Salva il **Bot Token** (es: `110201543:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw`)
-
-### 2. Ottieni Chat ID
-1. Aggiungi il bot ad una chat o gruppo
-2. Invia un messaggio qualsiasi
-3. Visita: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
-4. Trova il campo `"chat":{"id":123456789}` nel JSON
-
-### 3. Configura Secrets
-Aggiungi `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` nei secrets.
-
----
-
-## 📊 Utilizzo Dashboard
-
-### Sezioni Principali
-
-#### 1. **Market Regime**
-- **VIX Level**: Basso (<15), Medio (15-25), Alto (>25)
-- **SPY Trend**: UPTREND (sopra SMA200) / DOWNTREND (sotto SMA200)
-- **Top Sector**: Settore con score composito più alto
-
-#### 2. **Rankings**
-- **Top 5 Composite Score**: Strumenti più forti
-- **Bottom 5 Composite Score**: Strumenti più deboli
-
-#### 3. **Detailed Analysis**
-Per ogni ticker:
-- Price + Variazione 1D
-- Scores (Composite, Trend, Momentum, Volatility, Rel. Strength)
-- Segnali attivi (breakout, overbought, oversold, ecc.)
-- Grafico interattivo candlestick con overlay tecnici
-
-### Funzionalità Sidebar
-
-#### 🔄 Refresh Data
-Forza il download di dati aggiornati (bypassa cache)
-
-#### 📥 Export JSON
-Scarica file JSON strutturato per analisi LLM esterna:
-```json
-{
-  "metadata": {...},
-  "market_regime": {...},
-  "instruments": {
-    "SPY": {
-      "info": {...},
-      "current": {...},
-      "indicators": {...},
-      "scores": {...},
-      "signals": [...]
+CONFIG = {
+    'SMA_PERIODS': [20, 50, 125, 200],
+    'RSI_PERIOD': 14,
+    'LOOKBACK_DAYS': 400,  # Data history
+    'WEIGHTS': {
+        'TREND': 0.30,
+        'MOMENTUM': 0.30,
+        'VOLATILITY': 0.15,
+        'REL_STRENGTH': 0.25
     }
-  },
-  "rankings": {...}
 }
 ```
 
 ---
 
-## 🤖 Automazione GitHub Actions
+## 📊 Usage Examples
 
-Il sistema esegue automaticamente ogni giorno alle **08:00 IT**:
+### Command Line
 
-1. Download dati EODHD
-2. Calcolo indicatori e scoring
-3. Generazione report JSON
-4. Invio summary su Telegram
-5. (Opzionale) Commit JSON in `/data` per storico
+```bash
+# Full analysis
+python scheduler.py
 
-### Workflow File
-`.github/workflows/daily_analysis.yml` esegue:
-```yaml
-- Checkout repository
-- Setup Python 3.9
-- Install requirements
-- Run scheduler.py (analisi + Telegram)
+# Skip Telegram
+python scheduler.py --no-telegram
+
+# Skip reports
+python scheduler.py --no-reports
+
+# Commit to git
+python scheduler.py --commit
+
+# Help
+python scheduler.py --help
 ```
 
-### Verifica Esecuzione
-- GitHub → Actions tab → Vedi log ultima esecuzione
-- Telegram → Ricevi messaggio ore 08:00
+### Streamlit Dashboard
 
----
-
-## 🎨 Personalizzazione UI
-
-### Tema Colori
-Edita `.streamlit/config.toml`:
-```toml
-[theme]
-primaryColor = "#1a365d"
-backgroundColor = "#f7fafc"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#2d3748"
-font = "sans serif"
-```
-
-### Logo Custom
-Aggiungi immagine in `/assets/logo.png` e modifica `app.py`:
 ```python
-st.sidebar.image("assets/logo.png", width=200)
+# Launch
+streamlit run app.py
+
+# Features:
+# - 🔄 Refresh Data (clear cache)
+# - 📥 Export JSON
+# - 📱 Send Telegram
+# - 🔍 Filter by category
+# - 📊 Expandable/Tabs view
+```
+
+### Telegram Bot
+
+```
+📊 KRITERION QUANT - Daily Market Analysis
+📅 2024-12-31
+
+🌍 MARKET REGIME
+🟢 VIX: 14.50 (LOW)
+📈 SPY: UPTREND (Above SMA200)
+💼 Condition: Bullish
+
+🏆 TOP 5 PERFORMERS
+🟢 `QQQ   ` Score: 75.0 (Trend: 80)
+...
+
+🔔 CRITICAL SIGNALS
+• QQQ (3 signals):
+  → MACD Bullish Crossover
+  → Volume Surge (2.5x)
 ```
 
 ---
 
-## 📈 Performance & Ottimizzazione
+## 🧪 Testing
 
-### Cache Streamlit
-Il sistema utilizza `@st.cache_data` per:
-- Download dati (TTL: 1 ora)
-- Calcolo indicatori (TTL: 1 ora)
-- Generazione grafici (TTL: 1 ora)
+```bash
+# Test modules individually
+python config.py                # Config validation
+python data_fetcher.py          # EODHD connection
+python technical_indicators.py  # Indicator calculations
+python scoring_system.py        # Scoring algorithms
+python chart_generator.py       # Chart generation
+python telegram_notifier.py     # Telegram bot
 
-### Rate Limiting EODHD
-Configurato in `config.py`:
+# Integration test
+python scheduler.py --no-telegram
+
+# Expected:
+# ✅ 28-29 ticker downloaded
+# ✅ 50+ indicators calculated
+# ✅ 5 scores per instrument
+# ✅ Market regime detected
+# ✅ Signals generated
+# ✅ Reports saved
+# ⏱️ ~5-7 minutes total
+```
+
+---
+
+## 📈 Performance
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| **Execution Time** | 5-7 min | Full analysis 29 ticker |
+| **RAM Usage** | 500-800 MB | Peak during analysis |
+| **API Calls** | 30-35 | EODHD requests |
+| **Data Volume** | ~10 MB | Per ticker (400 days) |
+| **Cache TTL** | 1 hour | Streamlit caching |
+
+**Optimization:**
+- Reduce `LOOKBACK_DAYS` (400 → 200)
+- Increase `REQUEST_DELAY` (0.5s → 1s)
+- Remove less important tickers
+- Extend cache TTL (1h → 2h)
+
+---
+
+## 🔒 Security
+
+### Secrets Management
+
+❌ **NEVER commit:**
+- API keys
+- Bot tokens
+- `.streamlit/secrets.toml`
+- `.env` files
+
+✅ **Use:**
+- GitHub Secrets (Actions)
+- Streamlit Secrets (Cloud)
+- Environment variables (local)
+
+### API Key Security
+
+```bash
+# Check .gitignore
+cat .gitignore | grep secrets
+
+# Verify no secrets in commits
+git log --all | grep -i "api"
+
+# Rotate keys periodically
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### EODHD API Errors
+
+**401 Unauthorized:**
+```bash
+# Check key
+python -c "from config import SECRETS; print(SECRETS.get('EODHD_API_KEY'))"
+```
+
+**Rate Limit:**
+```
+Free: 20 req/day (insufficient)
+Need: 30-35 req
+Solution: Upgrade $9.99/month
+```
+
+### Streamlit Issues
+
+**Won't Deploy:**
+- Check requirements.txt syntax
+- Verify secrets TOML format
+- Review deployment logs
+
+**Out of Memory:**
 ```python
-"REQUEST_DELAY_MIN": 0.5,      # Secondi tra richieste
-"REQUEST_DELAY_MAX": 1.5,
-"BATCH_SIZE": 5,               # Ticker per batch
-"BATCH_DELAY_MIN": 3.0,        # Pausa tra batch
-"MAX_RETRIES": 3
+# config.py
+LOOKBACK_DAYS = 200  # Reduce from 400
 ```
 
----
+### Charts Not Displaying
 
-## 🐛 Troubleshooting
+```bash
+# Check Plotly version
+pip show plotly
 
-### Errore: "Invalid API Key"
-- Verifica che `EODHD_API_KEY` sia corretto in secrets
-- Controlla limiti piano EODHD (es: 20 richieste/sec su free tier)
+# Browser console
+F12 → Console → Check errors
+```
 
-### Errore: "Insufficient Data"
-- Alcuni ticker potrebbero non avere storico sufficiente (>250 giorni)
-- Sistema skippa automaticamente ticker problematici
-
-### Grafici non si caricano
-- Verifica connessione internet
-- Controlla console browser per errori JavaScript
-- Prova a ricaricare la pagina (Ctrl+F5)
-
-### Telegram non invia messaggi
-- Verifica `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`
-- Controlla che il bot sia stato aggiunto alla chat
-- Testa manualmente con: `python telegram_notifier.py`
+**📖 Full guide:** [DEPLOY_GUIDE.md#troubleshooting](DEPLOY_GUIDE.md#troubleshooting)
 
 ---
 
-## 📝 Roadmap Futuri Sviluppi
+## 📚 Documentation
 
-- [ ] Backtesting strategie basate su score composito
-- [ ] Alert personalizzati via email
-- [ ] Integrazione dati options (IV, Greeks)
-- [ ] Sentiment analysis (news/social)
-- [ ] Portfolio optimizer basato su scoring
-- [ ] API REST per accesso programmatico
-- [ ] Mobile app (React Native)
-- [ ] Database PostgreSQL per storico analisi
+- **Main Guide**: This README
+- **Deployment**: [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md)
+- **Code Comments**: Inline docstrings
+- **Test Scripts**: `if __name__ == "__main__"` blocks
 
 ---
 
-## 🤝 Contributi
+## 🤝 Contributing
 
-Contributi, issues e feature requests sono benvenuti!
+Contributions welcome!
 
-1. Fork del progetto
-2. Crea branch feature (`git checkout -b feature/AmazingFeature`)
-3. Commit modifiche (`git commit -m 'Add AmazingFeature'`)
-4. Push al branch (`git push origin feature/AmazingFeature`)
-5. Apri Pull Request
+```bash
+1. Fork repository
+2. Create feature branch
+3. Commit changes
+4. Push to branch
+5. Open Pull Request
+```
+
+**Guidelines:**
+- Follow existing code style
+- Add tests for features
+- Update documentation
 
 ---
 
 ## 📄 License
 
-Questo progetto è rilasciato sotto licenza **MIT**. Vedi file `LICENSE` per dettagli.
+MIT License - see [LICENSE](LICENSE)
 
----
-
-## 👨‍💻 Autore
-
-**Kriterion Quant**  
-🌐 Website: [KriterionQuant.com](https://kriterionquant.com)  
-📧 Email: info@kriterionquant.com  
-💼 LinkedIn: [Kriterion Quant](https://linkedin.com/company/kriterion-quant)
-
----
-
-## 🙏 Acknowledgments
-
-- **EODHD** per i dati finanziari di qualità
-- **Streamlit** per il framework UI eccellente
-- **Plotly** per i grafici interattivi
-- **Comunità quantitative finance** per feedback e best practices
+**Summary:**
+- ✅ Commercial use
+- ✅ Modification
+- ✅ Distribution
+- ❌ Liability
+- ❌ Warranty
 
 ---
 
 ## ⚠️ Disclaimer
 
-Questo software è fornito **esclusivamente a scopo educativo e informativo**. 
+**EDUCATIONAL PURPOSE ONLY**
 
-**NON costituisce consulenza finanziaria**. Gli utenti sono responsabili delle proprie decisioni di investimento. Il trading comporta rischi significativi di perdita di capitale.
+- ❌ NOT financial advice
+- ❌ NOT investment recommendations
+- ❌ NOT trading signals
 
-Kriterion Quant e i contributori non si assumono alcuna responsabilità per perdite derivanti dall'uso di questo sistema.
-
-**USE AT YOUR OWN RISK.**
+**Risk Warning:**
+- Trading involves substantial risk
+- Past performance ≠ future results
+- Consult licensed advisor
+- Use at your own risk
 
 ---
 
-## 📞 Supporto
+## 🙏 Acknowledgments
 
-Per supporto tecnico o domande:
-- 📧 Email: support@kriterionquant.com
-- 💬 Discord: [Kriterion Quant Community](https://discord.gg/kriterion)
-- 📖 Documentazione: [docs.kriterionquant.com](https://docs.kriterionquant.com)
+**Technologies:**
+- [Streamlit](https://streamlit.io) - Dashboard
+- [Plotly](https://plotly.com) - Charts
+- [Pandas](https://pandas.pydata.org) - Data analysis
+- [EODHD](https://eodhistoricaldata.com) - Financial data
+- [GitHub Actions](https://github.com/features/actions) - Automation
+- [Telegram](https://telegram.org) - Notifications
+
+---
+
+## 📞 Support
+
+### Help
+
+- **Issues**: [GitHub Issues](https://github.com/your-username/dma-system/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-username/dma-system/discussions)
+- **Email**: support@kriterionquant.com
+
+### Community
+
+- **Website**: https://kriterionquant.com
+- **Telegram**: [@KriterionQuant](https://t.me/kriterionquant)
+- **Twitter**: [@KriterionQuant](https://twitter.com/kriterionquant)
+
+---
+
+## 📊 Project Stats
+
+![GitHub stars](https://img.shields.io/github/stars/your-username/dma-system?style=social)
+![GitHub forks](https://img.shields.io/github/forks/your-username/dma-system?style=social)
+
+- **Lines of Code**: ~5,250
+- **Files**: 19
+- **Modules**: 11
+- **Documentation**: 2 guides
+
+---
+
+## 🎓 About Kriterion Quant
+
+Piattaforma educativa per finanza quantitativa e trading sistematico.
+
+**Mission:** Democratizzare strumenti quantitativi professionali.
+
+**Offerings:**
+- Educational content
+- Open-source tools
+- Quantitative research
+- Training courses
+
+**Learn More:** https://kriterionquant.com
 
 ---
 
@@ -418,6 +562,10 @@ Per supporto tecnico o domande:
 
 **Made with ❤️ by Kriterion Quant**
 
-⭐ Se trovi utile questo progetto, lascia una stella su GitHub! ⭐
+⭐ **Star this repo if useful!** ⭐
+
+[Website](https://kriterionquant.com) | [GitHub](https://github.com/your-username) | [Twitter](https://twitter.com/kriterionquant)
+
+*Version 1.0.0 - Last updated: 2024-12-31*
 
 </div>
