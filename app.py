@@ -610,6 +610,47 @@ def main():
     # Main content
     render_header()
     
+    # Debug: Check secrets loading (remove in production)
+    api_key_exists = bool(SECRETS.get('EODHD_API_KEY'))
+    
+    # Check if EODHD API key is configured
+    if not api_key_exists:
+        st.error("❌ **EODHD API Key Not Configured**")
+        
+        # Debug info
+        with st.expander("🔍 Debug Info"):
+            st.write("Checking secrets loading...")
+            st.write(f"SECRETS dict keys: {list(SECRETS.keys())}")
+            st.write(f"API Key present: {api_key_exists}")
+            st.write(f"API Key length: {len(SECRETS.get('EODHD_API_KEY', ''))}")
+            
+            # Try to reload secrets
+            try:
+                import streamlit as st
+                st.write(f"st.secrets available: {hasattr(st, 'secrets')}")
+                if hasattr(st, 'secrets'):
+                    st.write(f"st.secrets keys: {list(st.secrets.keys())}")
+            except Exception as e:
+                st.write(f"Error checking st.secrets: {e}")
+        
+        st.warning("""
+        Please configure your EODHD API key to use this application.
+        
+        **For Streamlit Cloud:**
+        1. Click on ⚙️ **Settings** (hamburger menu top-right)
+        2. Go to **Secrets**
+        3. Add:
+        ```toml
+        EODHD_API_KEY = "your_api_key_here"
+        ```
+        4. Click **Save**
+        5. App will restart automatically
+        
+        **Get your API key:** https://eodhistoricaldata.com
+        """)
+        st.info("💡 **Tip:** Free tier provides 20 API calls/day. For this system, a paid plan ($9.99/month) is recommended.")
+        st.stop()
+    
     # Load data on first run
     if st.session_state.analysis_result is None:
         with st.spinner("🚀 Loading market data... This may take a few minutes..."):
@@ -623,6 +664,11 @@ def main():
             except Exception as e:
                 st.error("❌ Failed to load market data")
                 st.error(str(e))
+                
+                # Check if it's an API key error
+                if "401" in str(e) or "Unauthorized" in str(e):
+                    st.warning("🔑 **API Key Error:** Your EODHD API key may be invalid or expired.")
+                    st.info("Please verify your API key in Settings → Secrets")
                 
                 with st.expander("Error Details"):
                     st.code(traceback.format_exc())
