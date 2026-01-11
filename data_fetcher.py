@@ -5,12 +5,11 @@ KRITERION QUANT - Daily Market Analysis System
 Data Fetcher Module - Hybrid (EODHD + Yahoo Finance)
 ============================================================================
 Gestisce:
-- Download dati storici da EODHD API (Default)
+- Download dati storici da EODHD API (Default per azioni/ETF)
 - Download dati VIX da Yahoo Finance (Fallback/Override)
-- Rate limiting intelligente
-- Retry logic con exponential backoff
-- Conversione formato EODHD → DataFrame compatibile
-- Batch processing per universo completo
+- Rate limiting intelligente e Retry logic
+- Normalizzazione dati
+- FIX DATE: Taglio rigoroso alla data di ieri (T-1) per coerenza analisi
 ============================================================================
 """
 
@@ -20,7 +19,7 @@ import numpy as np
 import time
 import random
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple
 import logging
 
@@ -49,6 +48,7 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
         logger.info(f"📥 Fetching {ticker} via Yahoo Finance...")
         
         # Yahoo Finance download
+        # Nota: yfinance scarica fino a end_date escluso.
         df = yf.download(ticker, start=start_date, end=end_date, progress=False)
         
         if df.empty:
@@ -62,7 +62,7 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # Rinomina colonna data se necessario (a volte è 'index' o 'Date')
+        # Rinomina colonna data se necessario
         if 'Date' not in df.columns and 'index' in df.columns:
             df.rename(columns={'index': 'Date'}, inplace=True)
 
@@ -105,14 +105,9 @@ class EODHDClient:
     """
     
     def __init__(self, api_key: str = None):
-        """
-        Inizializza client EODHD.
-        
-        Args:
-            api_key: EODHD API Key (default: da config.SECRETS)
-        """
+        """Inizializza client EODHD."""
         self.api_key = api_key or SECRETS.get('EODHD_API_KEY', '')
-        # Non solleviamo eccezione qui se manca la key, perché potremmo usare solo Yahoo
+        
         if not self.api_key:
             logger.warning("⚠️ EODHD_API_KEY non configurata. I download da EODHD falliranno.")
         
@@ -124,8 +119,6 @@ class EODHDClient:
         self.request_delay_min = CONFIG['REQUEST_DELAY_MIN']
         self.request_delay_max = CONFIG['REQUEST_DELAY_MAX']
         self.last_request_time = 0
-        
-        logger.info("✅ EODHD Client inizializzato")
     
     def _apply_rate_limit(self):
         """Applica rate limiting tra richieste."""
@@ -139,9 +132,7 @@ class EODHDClient:
         self.last_request_time = time.time()
     
     def _make_request(self, url: str, params: dict, attempt: int = 1) -> Optional[dict]:
-        """
-        Esegue richiesta HTTP con retry logic.
-        """
+        """Esegue richiesta HTTP con retry logic."""
         if not self.api_key:
             return None
 
@@ -163,21 +154,17 @@ class EODHDClient:
                 return None
             
             elif response.status_code == 429:
-                # Rate limit exceeded
-                wait_time = 60 * attempt  # Exponential backoff
+                wait_time = 60 * attempt
                 logger.warning(f"⚠️ Rate limit exceeded, wait {wait_time}s...")
                 time.sleep(wait_time)
-                
                 if attempt < self.max_retries:
                     return self._make_request(url, params, attempt + 1)
                 return None
             
             elif response.status_code >= 500:
-                # Server error - retry
                 logger.warning(f"⚠️ Server error {response.status_code}, retry {attempt}/{self.max_retries}")
-                
                 if attempt < self.max_retries:
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    time.sleep(2 ** attempt)
                     return self._make_request(url, params, attempt + 1)
                 return None
             
@@ -203,12 +190,8 @@ class EODHDClient:
         start_date: str,
         end_date: str
     ) -> Optional[pd.DataFrame]:
-        """
-        Scarica dati End-of-Day da EODHD.
-        """
-        # Costruisci symbol EODHD format
+        """Scarica dati End-of-Day da EODHD."""
         symbol = f"{ticker}.{exchange}"
-        
         url = f"{self.base_url}/eod/{symbol}"
         
         params = {
@@ -216,7 +199,7 @@ class EODHDClient:
             'from': start_date,
             'to': end_date,
             'fmt': 'json',
-            'period': 'd'  # Daily data
+            'period': 'd'
         }
         
         logger.info(f"📥 Fetching {symbol} (EODHD) from {start_date} to {end_date}")
@@ -227,7 +210,6 @@ class EODHDClient:
             logger.error(f"❌ Nessun dato ricevuto per {symbol}")
             return None
         
-        # Converti in DataFrame
         try:
             df = pd.DataFrame(data)
             
@@ -235,38 +217,21 @@ class EODHDClient:
                 logger.warning(f"⚠️ DataFrame vuoto per {symbol}")
                 return None
             
-            # Rinomina colonne per compatibilità
+            # Rinomina colonne
             column_mapping = {
-                'date': 'Date',
-                'open': 'Open',
-                'high': 'High',
-                'low': 'Low',
-                'close': 'Close',
-                'volume': 'Volume',
+                'date': 'Date', 'open': 'Open', 'high': 'High', 
+                'low': 'Low', 'close': 'Close', 'volume': 'Volume', 
                 'adjusted_close': 'Adj Close'
             }
-            
             df = df.rename(columns=column_mapping)
             
-            # Converti Date in datetime
+            # Converti Date
             df['Date'] = pd.to_datetime(df['Date'])
             
-            # Assicurati che Adj Close esista
             if 'Adj Close' not in df.columns:
                 df['Adj Close'] = df['Close']
             
-            # Ordina per data crescente
             df = df.sort_values('Date').reset_index(drop=True)
-            
-            # Validazione dati
-            if len(df) < CONFIG['MIN_REQUIRED_ROWS']:
-                logger.warning(
-                    f"⚠️ {symbol}: solo {len(df)} righe, "
-                    f"minimo richiesto {CONFIG['MIN_REQUIRED_ROWS']}"
-                )
-                return None
-            
-            logger.info(f"✅ {symbol}: {len(df)} righe scaricate")
             return df
             
         except Exception as e:
@@ -277,14 +242,8 @@ class EODHDClient:
         """Ottiene ultima quotazione real-time."""
         symbol = f"{ticker}.{exchange}"
         url = f"{self.base_url}/real-time/{symbol}"
-        
-        params = {
-            'api_token': self.api_key,
-            'fmt': 'json'
-        }
-        
-        data = self._make_request(url, params)
-        return data
+        params = {'api_token': self.api_key, 'fmt': 'json'}
+        return self._make_request(url, params)
 
 # ============================================================================
 # HIGH-LEVEL FETCHING FUNCTIONS
@@ -304,7 +263,7 @@ def download_ticker_data(
     if ticker == "^VIX":
         return fetch_from_yahoo(ticker, start_date, end_date)
     
-    # Per tutti gli altri, proseguiamo con EODHD come da configurazione
+    # Per tutti gli altri, usiamo EODHD
     ticker_info = UNIVERSE.get(ticker)
     if not ticker_info:
         logger.error(f"❌ Ticker {ticker} non trovato in UNIVERSE")
@@ -314,11 +273,7 @@ def download_ticker_data(
     
     # Inizializza client
     client = EODHDClient()
-    
-    # Scarica dati
-    df = client.get_eod_data(ticker, exchange, start_date, end_date)
-    
-    return df
+    return client.get_eod_data(ticker, exchange, start_date, end_date)
 
 def download_universe_data(
     start_date: str,
@@ -326,40 +281,44 @@ def download_universe_data(
     progress_callback=None
 ) -> Dict[str, pd.DataFrame]:
     """
-    Scarica dati per tutti i ticker dell'universo con batch processing.
+    Scarica dati per tutti i ticker dell'universo.
     """
     logger.info(f"🚀 Avvio download universo ({len(UNIVERSE)} ticker)")
     
     results = {}
     failed = []
-    
     tickers = list(UNIVERSE.keys())
     total_tickers = len(tickers)
     
-    # Batch processing
+    # Batch processing parameters
     batch_size = CONFIG['BATCH_SIZE']
     batch_delay_min = CONFIG['BATCH_DELAY_MIN']
     batch_delay_max = CONFIG['BATCH_DELAY_MAX']
     
     for i, ticker in enumerate(tickers, 1):
         try:
-            # Progress callback
             if progress_callback:
                 progress_callback(i, total_tickers, ticker)
             
-            # Utilizza la funzione wrapper che gestisce la logica Ibrida
+            # Download
             df = download_ticker_data(ticker, start_date, end_date)
             
             if df is not None and not df.empty:
-                results[ticker] = df
+                # --- CRITICAL STEP: CLEAN & VALIDATE ---
+                # Pulisce i dati e, soprattutto, rimuove la data odierna
+                df = clean_dataframe(df)
+                
+                if validate_dataframe(df, ticker):
+                    results[ticker] = df
+                else:
+                    failed.append(ticker)
             else:
                 failed.append(ticker)
             
-            # Batch delay (ogni N ticker)
-            # Applichiamo il delay anche se usiamo Yahoo per mantenere il ritmo del loop uniforme
+            # Batch delay
             if i % batch_size == 0 and i < total_tickers:
                 delay = random.uniform(batch_delay_min, batch_delay_max)
-                logger.info(f"⏸️ Batch delay: {delay:.1f}s (completati {i}/{total_tickers})")
+                logger.info(f"⏸️ Batch delay: {delay:.1f}s")
                 time.sleep(delay)
                 
         except Exception as e:
@@ -367,23 +326,19 @@ def download_universe_data(
             failed.append(ticker)
     
     # Summary
-    success_count = len(results)
-    fail_count = len(failed)
-    
     logger.info("="*70)
-    logger.info(f"✅ Download completato: {success_count}/{total_tickers} ticker OK")
-    
+    logger.info(f"✅ Download completato: {len(results)}/{total_tickers} ticker OK")
     if failed:
-        logger.warning(f"⚠️ Failed: {fail_count} ticker")
-        logger.warning(f"   {', '.join(failed)}")
+        logger.warning(f"⚠️ Failed: {', '.join(failed)}")
     
     return results
 
 def get_date_range_for_analysis() -> Tuple[str, str]:
     """
-    Calcola range date per analisi (oggi - LOOKBACK_DAYS fino a ieri).
+    Calcola range date per analisi (T-1).
+    End date è rigorosamente IERI.
     """
-    # End date = ieri (per avere dati completi)
+    # End date = ieri
     end_date = datetime.now() - timedelta(days=1)
     
     # Start date = end_date - lookback
@@ -396,9 +351,7 @@ def get_date_range_for_analysis() -> Tuple[str, str]:
     )
 
 def validate_dataframe(df: pd.DataFrame, ticker: str) -> bool:
-    """
-    Valida DataFrame scaricato.
-    """
+    """Valida integrità DataFrame."""
     if df is None or df.empty:
         logger.warning(f"⚠️ {ticker}: DataFrame vuoto")
         return False
@@ -410,31 +363,28 @@ def validate_dataframe(df: pd.DataFrame, ticker: str) -> bool:
         logger.warning(f"⚠️ {ticker}: Colonne mancanti: {missing_cols}")
         return False
     
-    # Check NaN values (escludiamo Volume che può essere 0 o NaN su indici)
-    if df[['Open', 'High', 'Low', 'Close']].isnull().any().any():
-        logger.warning(f"⚠️ {ticker}: Contiene NaN nei prezzi")
-        return False
-    
-    # Check min rows
     if len(df) < CONFIG['MIN_REQUIRED_ROWS']:
-        logger.warning(
-            f"⚠️ {ticker}: Solo {len(df)} righe, "
-            f"minimo {CONFIG['MIN_REQUIRED_ROWS']}"
-        )
+        logger.warning(f"⚠️ {ticker}: Solo {len(df)} righe (min {CONFIG['MIN_REQUIRED_ROWS']})")
         return False
     
     return True
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Pulisce e prepara DataFrame per analisi.
+    Pulisce il DataFrame e rimuove rigorosamente la data odierna se presente.
+    Garantisce consistenza T-1 (analisi sui dati di chiusura ieri).
     """
     df = df.copy()
     
     # Remove NaN rows
     df = df.dropna(subset=['Open', 'High', 'Low', 'Close'])
     
-    # Ensure positive prices (escludiamo VIX dai controlli stretti se necessario, ma Close > 0 è sicuro)
+    # --- DATE TRIMMING LOGIC ---
+    # Rimuoviamo qualsiasi riga che abbia data >= Oggi (es. EODHD potrebbe dare dati intraday)
+    today = pd.Timestamp(date.today())
+    df = df[df['Date'] < today]
+    
+    # Ensure positive prices
     price_cols = ['Open', 'High', 'Low', 'Close', 'Adj Close']
     for col in price_cols:
         if col in df.columns:
@@ -443,136 +393,33 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # Sort by date
     df = df.sort_values('Date').reset_index(drop=True)
     
-    # Convert Volume to numeric (handle strings)
+    # Convert Volume
     if 'Volume' in df.columns:
         df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce').fillna(0)
     
     return df
 
 # ============================================================================
-# CACHING UTILITIES (for Streamlit)
+# CACHING UTILITIES
 # ============================================================================
 
 def get_cached_data_key() -> str:
-    """
-    Genera chiave unica per cache basata su data corrente.
-    Cache viene invalidata ogni giorno.
-    """
+    """Genera chiave cache giornaliera."""
     return datetime.now().strftime('%Y-%m-%d')
 
 # ============================================================================
-# TEST FUNCTIONS
-# ============================================================================
-
-def test_connection() -> bool:
-    """
-    Testa connessione EODHD API.
-    """
-    logger.info("🔍 Test connessione EODHD API...")
-    
-    try:
-        client = EODHDClient()
-        
-        # Test con SPY (dovrebbe sempre funzionare se API key ok)
-        if client.api_key:
-            end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-            start_date = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
-            
-            df = client.get_eod_data('SPY', 'US', start_date, end_date)
-            
-            if df is not None and not df.empty:
-                logger.info(f"✅ Connessione OK - SPY: {len(df)} righe")
-                return True
-            else:
-                logger.error("❌ Connessione fallita - Nessun dato ricevuto")
-                return False
-        else:
-            logger.warning("⚠️ API Key mancante - Test EODHD saltato")
-            return True # Ritorniamo True se vogliamo testare solo Yahoo
-            
-    except Exception as e:
-        logger.error(f"❌ Errore test connessione: {str(e)}")
-        return False
-
-def download_sample_data(ticker: str = "SPY") -> Optional[pd.DataFrame]:
-    """
-    Scarica dati sample per testing.
-    """
-    start_date, end_date = get_date_range_for_analysis()
-    
-    logger.info(f"📊 Download sample data: {ticker}")
-    logger.info(f"   Range: {start_date} → {end_date}")
-    
-    df = download_ticker_data(ticker, start_date, end_date)
-    
-    if df is not None:
-        logger.info(f"✅ Sample data downloaded: {len(df)} rows")
-        logger.info(f"   Date range: {df['Date'].min()} → {df['Date'].max()}")
-        logger.info(f"   Columns: {list(df.columns)}")
-        return df
-    else:
-        logger.error(f"❌ Failed to download sample data")
-        return None
-
-# ============================================================================
-# MAIN TEST SCRIPT
+# TEST EXECUTION
 # ============================================================================
 
 if __name__ == "__main__":
-    print("="*70)
-    print("KRITERION QUANT - Data Fetcher Test (Hybrid)")
-    print("="*70)
-    
-    # 1. Test connessione
-    print("\n1. Test Connessione EODHD:")
-    if test_connection():
-        print("   ✅ Test connessione OK")
-    else:
-        print("   ❌ Problemi con API Key o connessione")
-    
-    # 2. Test download singolo ticker EODHD
-    print("\n2. Test Download Singolo Ticker (SPY - EODHD):")
-    df_spy = download_sample_data("SPY")
-    if df_spy is not None:
-        print(f"   ✅ SPY downloaded: {len(df_spy)} righe")
-        print(f"\n   Prime 3 righe:")
-        print(df_spy.head(3).to_string())
-    
-    # 3. Test download ticker speciali (Yahoo)
-    print("\n3. Test Ticker Speciali (^VIX - Yahoo):")
-    
-    # VIX (Index) - Dovrebbe usare Yahoo
-    print("\n   a) VIX (Volatility Index):")
+    # Semplice test se eseguito direttamente
+    print("Test Data Fetcher...")
     start, end = get_date_range_for_analysis()
-    df_vix = download_ticker_data("^VIX", start, end)
+    print(f"Range Analisi: {start} -> {end}")
     
-    if df_vix is not None:
-        print(f"      ✅ VIX: {len(df_vix)} righe")
-        print(f"      Source: Yahoo Finance")
-        print(df_vix.head(3).to_string())
+    # Test VIX (Yahoo)
+    vix = download_ticker_data("^VIX", start, end)
+    if vix is not None:
+        print(f"VIX OK: {len(vix)} righe. Ultima: {vix['Date'].iloc[-1]}")
     else:
-        print("      ❌ VIX download fallito")
-    
-    # 4. Test batch download (sample)
-    print("\n4. Test Batch Download (sample misto):")
-    sample_tickers = ['SPY', '^VIX']
-    
-    # Override temporaneo universe per test
-    import config
-    original_universe = config.UNIVERSE
-    config.UNIVERSE = {k: v for k, v in original_universe.items() if k in sample_tickers}
-    # Assicuriamo che VIX sia nell'universo se non c'era
-    if "^VIX" not in config.UNIVERSE:
-        config.UNIVERSE["^VIX"] = {"name": "Volatility Index", "category": "Volatility", "eodhd_exchange": "INDX"}
-    
-    results = download_universe_data(start, end)
-    
-    print(f"\n   ✅ Downloaded: {len(results)}/{len(sample_tickers)} ticker")
-    for ticker, df in results.items():
-        print(f"      - {ticker}: {len(df)} righe")
-    
-    # Restore universe
-    config.UNIVERSE = original_universe
-    
-    print("\n" + "="*70)
-    print("✅ Test completato")
+        print("VIX Failed")
