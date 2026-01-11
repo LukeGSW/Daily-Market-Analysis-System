@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 def convert_types(obj):
     """
     Converte tipi numpy/pandas in tipi nativi Python per JSON serialization.
+    FIX: Compatibile con NumPy 2.0+ (rimossi np.float_, np.int_ deprecati)
     
     Args:
         obj: Oggetto da convertire
@@ -44,16 +45,17 @@ def convert_types(obj):
         Oggetto convertito
     """
     # Gestione Interi NumPy
-    if isinstance(obj, (np.int_, np.intc, np.intp, np.int8,
-        np.int16, np.int32, np.int64, np.uint8,
-        np.uint16, np.uint32, np.uint64, np.integer)):
+    # Nota: np.int_ è rimosso in NumPy 2.0, usiamo i tipi specifici o int
+    if isinstance(obj, (np.int8, np.int16, np.int32, np.int64, 
+                       np.uint8, np.uint16, np.uint32, np.uint64, np.integer)):
         return int(obj)
     
     # Gestione Float NumPy
-    elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64, np.floating)):
+    # Nota: np.float_ è rimosso in NumPy 2.0
+    elif isinstance(obj, (np.float16, np.float32, np.float64, np.floating)):
         return float(obj)
     
-    # Gestione Booleani NumPy (IL FIX CHE MANCAVA)
+    # Gestione Booleani NumPy
     elif isinstance(obj, (np.bool_, bool)):
         return bool(obj)
     
@@ -102,11 +104,6 @@ def generate_json_report(analysis_result: Dict) -> str:
     """
     Genera report JSON strutturato dall'analysis result.
     
-    Il JSON è ottimizzato per:
-    - Analisi LLM esterna
-    - Data persistence
-    - API consumption
-    
     Args:
         analysis_result: Output da market_analysis.run_full_analysis()
     
@@ -115,15 +112,13 @@ def generate_json_report(analysis_result: Dict) -> str:
     """
     logger.info("📄 Generazione JSON report...")
     
-    # Seleziona le sezioni rilevanti (escludendo DataFrame pesanti se presenti in processed_data)
-    # processed_data solitamente contiene DF che non vogliamo nel JSON di sintesi, 
-    # ma se servissero per l'LLM, andrebbero convertiti. Per ora manteniamo la struttura snella.
+    # Struttura dati per il report
     report_data = {
         'metadata': analysis_result.get('metadata', {}),
         'market_regime': analysis_result.get('market_regime', {}),
         'instruments': analysis_result.get('instruments', {}),
         'rankings': analysis_result.get('rankings', {}),
-        'notable_events': analysis_result.get('notable_events', []) # Aggiunto se presente
+        'notable_events': analysis_result.get('notable_events', [])
     }
     
     try:
@@ -148,13 +143,6 @@ def generate_json_report(analysis_result: Dict) -> str:
 def save_json_report(json_string: str, filepath: str = None) -> str:
     """
     Salva JSON report su file.
-    
-    Args:
-        json_string: JSON da salvare
-        filepath: Path file (default: dma_data_YYYY-MM-DD.json)
-    
-    Returns:
-        Path file salvato
     """
     if filepath is None:
         date_str = datetime.now().strftime('%Y-%m-%d')
@@ -366,43 +354,24 @@ def generate_html_report(
     analysis_result: Dict,
     charts_html: Dict[str, str] = None
 ) -> str:
-    """
-    Genera report HTML completo usando template Jinja2.
-    
-    Args:
-        analysis_result: Output da market_analysis.run_full_analysis()
-        charts_html: Dict {ticker: HTML string} da chart_generator
-    
-    Returns:
-        HTML string completo
-    """
+    """Genera report HTML completo."""
     logger.info("📄 Generazione HTML report...")
     
     from jinja2 import Template
     
-    # Helper functions per template
     def get_color(score: float) -> str:
-        """Mappa score a colore."""
-        if score >= 70:
-            return CONFIG['COLORS']['SCORE_EXCELLENT']
-        elif score >= 55:
-            return CONFIG['COLORS']['SCORE_GOOD']
-        elif score >= 40:
-            return CONFIG['COLORS']['SCORE_NEUTRAL']
-        elif score >= 25:
-            return CONFIG['COLORS']['SCORE_POOR']
-        else:
-            return CONFIG['COLORS']['SCORE_BAD']
+        if score >= 70: return CONFIG['COLORS']['SCORE_EXCELLENT']
+        elif score >= 55: return CONFIG['COLORS']['SCORE_GOOD']
+        elif score >= 40: return CONFIG['COLORS']['SCORE_NEUTRAL']
+        elif score >= 25: return CONFIG['COLORS']['SCORE_POOR']
+        else: return CONFIG['COLORS']['SCORE_BAD']
     
-    # Genera charts se non forniti
     if charts_html is None:
-        logger.info("   Generazione grafici per HTML...")
         from chart_generator import generate_all_charts
         processed_data = analysis_result.get('processed_data', {})
         charts = generate_all_charts(processed_data)
         charts_html = generate_charts_html(charts)
     
-    # Determina top sector
     instruments = analysis_result.get('instruments', {})
     top_sector = "N/A"
     best_score = -1
@@ -414,7 +383,6 @@ def generate_html_report(
                 best_score = score
                 top_sector = ticker
     
-    # Render template
     template = Template(HTML_TEMPLATE)
     
     html_output = template.render(
@@ -428,21 +396,10 @@ def generate_html_report(
         get_color=get_color
     )
     
-    logger.info(f"✅ HTML report generato: {len(html_output)} caratteri")
-    
     return html_output
 
 def save_html_report(html_string: str, filepath: str = None) -> str:
-    """
-    Salva HTML report su file.
-    
-    Args:
-        html_string: HTML da salvare
-        filepath: Path file (default: dma_report_YYYY-MM-DD.html)
-    
-    Returns:
-        Path file salvato
-    """
+    """Salva HTML report su file."""
     if filepath is None:
         date_str = datetime.now().strftime('%Y-%m-%d')
         filepath = f"dma_report_{date_str}.html"
@@ -450,10 +407,7 @@ def save_html_report(html_string: str, filepath: str = None) -> str:
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(html_string)
-        
-        logger.info(f"💾 HTML salvato: {filepath}")
         return filepath
-        
     except Exception as e:
         logger.error(f"❌ Errore salvataggio HTML: {str(e)}")
         raise
@@ -467,32 +421,12 @@ def generate_complete_reports(
     output_dir: str = ".",
     save_files: bool = True
 ) -> Dict[str, str]:
-    """
-    Genera entrambi i report (JSON + HTML) e li salva.
-    
-    Args:
-        analysis_result: Output da market_analysis.run_full_analysis()
-        output_dir: Directory output files
-        save_files: Se True, salva su disco
-    
-    Returns:
-        Dict con paths e contenuti:
-        {
-            'json_content': str,
-            'json_path': str,
-            'html_content': str,
-            'html_path': str
-        }
-    """
-    logger.info("="*70)
+    """Genera entrambi i report (JSON + HTML)."""
     logger.info("📊 GENERAZIONE REPORT COMPLETI")
-    logger.info("="*70)
     
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
     
-    # 1. JSON Report
-    logger.info("\n1. Generazione JSON Report...")
     json_content = generate_json_report(analysis_result)
     json_path = None
     
@@ -500,10 +434,6 @@ def generate_complete_reports(
         json_path = str(output_dir / f"dma_data_{datetime.now().strftime('%Y-%m-%d')}.json")
         save_json_report(json_content, json_path)
     
-    # 2. HTML Report
-    logger.info("\n2. Generazione HTML Report...")
-    
-    # Genera charts HTML
     processed_data = analysis_result.get('processed_data', {})
     from chart_generator import generate_all_charts
     charts = generate_all_charts(processed_data)
@@ -515,18 +445,6 @@ def generate_complete_reports(
     if save_files:
         html_path = str(output_dir / f"dma_report_{datetime.now().strftime('%Y-%m-%d')}.html")
         save_html_report(html_content, html_path)
-    
-    # Summary
-    logger.info("\n" + "="*70)
-    logger.info("✅ REPORT GENERATI CON SUCCESSO")
-    logger.info("="*70)
-    
-    if save_files:
-        logger.info(f"📄 JSON: {json_path}")
-        logger.info(f"📄 HTML: {html_path}")
-    
-    logger.info(f"📊 JSON Size: {len(json_content):,} bytes")
-    logger.info(f"📊 HTML Size: {len(html_content):,} bytes")
     
     return {
         'json_content': json_content,
@@ -540,154 +458,14 @@ def generate_complete_reports(
 # ============================================================================
 
 def load_json_report(filepath: str) -> Dict:
-    """
-    Carica JSON report da file.
-    
-    Args:
-        filepath: Path file JSON
-    
-    Returns:
-        Dict con dati report
-    """
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        logger.info(f"✅ JSON caricato: {filepath}")
-        return data
-        
-    except Exception as e:
-        logger.error(f"❌ Errore caricamento JSON: {str(e)}")
-        raise
+    with open(filepath, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
 def get_report_summary(json_data: Dict) -> Dict:
-    """
-    Estrae summary da JSON report.
-    
-    Args:
-        json_data: Dict da load_json_report()
-    
-    Returns:
-        Dict summary
-    """
-    metadata = json_data.get('metadata', {})
-    market_regime = json_data.get('market_regime', {})
-    instruments = json_data.get('instruments', {})
     rankings = json_data.get('rankings', {})
-    
-    summary = {
-        'date': metadata.get('analysis_date', 'N/A'),
-        'instruments_count': len(instruments),
-        'market_condition': market_regime.get('market_condition', 'unknown'),
-        'vix_level': market_regime.get('vix_level', 0),
-        'top_3': [item['ticker'] for item in rankings.get('by_composite_score', [])[:3]],
-        'bottom_3': [item['ticker'] for item in rankings.get('by_composite_score', [])[-3:]]
+    return {
+        'top_3': [item['ticker'] for item in rankings.get('by_composite_score', [])[:3]]
     }
-    
-    return summary
-
-# ============================================================================
-# TEST SCRIPT
-# ============================================================================
 
 if __name__ == "__main__":
-    print("="*70)
-    print("KRITERION QUANT - Report Generator Test")
-    print("="*70)
-    
-    # Mock analysis result per test
-    print("\n1. Creazione mock analysis result...")
-    
-    mock_result = {
-        'metadata': {
-            'analysis_date': '2024-12-31',
-            'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'version': '1.0',
-            'generated_by': 'Test',
-            'instruments_analyzed': 3
-        },
-        'market_regime': {
-            'vix_level': 14.5,
-            'vix_regime': 'low',
-            'spy_trend': 'uptrend',
-            'spy_above_sma200': True,
-            'market_condition': 'bullish'
-        },
-        'instruments': {
-            'SPY': {
-                'info': {'name': 'S&P 500 ETF', 'category': 'Equity Index', 'benchmark': 'SPY'},
-                'current': {'price': 500.0, 'change_1d_pct': 0.5, 'volume': 100000000},
-                'scores': {'composite': 65, 'trend': 70, 'momentum': 60, 'volatility': 70, 'relative_strength': 0},
-                'signals': ['Breaking above weekly high']
-            },
-            'QQQ': {
-                'info': {'name': 'Nasdaq 100 ETF', 'category': 'Equity Index', 'benchmark': 'SPY'},
-                'current': {'price': 400.0, 'change_1d_pct': 1.0, 'volume': 50000000},
-                'scores': {'composite': 75, 'trend': 80, 'momentum': 70, 'volatility': 75, 'relative_strength': 80},
-                'signals': []
-            },
-            'XLK': {
-                'info': {'name': 'Technology Select', 'category': 'Sector', 'benchmark': 'SPY'},
-                'current': {'price': 200.0, 'change_1d_pct': 0.8, 'volume': 20000000},
-                'scores': {'composite': 72, 'trend': 75, 'momentum': 68, 'volatility': 72, 'relative_strength': 75},
-                'signals': ['MACD Bullish Crossover']
-            }
-        },
-        'rankings': {
-            'by_composite_score': [
-                {'ticker': 'QQQ', 'composite': 75, 'trend': 80},
-                {'ticker': 'XLK', 'composite': 72, 'trend': 75},
-                {'ticker': 'SPY', 'composite': 65, 'trend': 70}
-            ]
-        },
-        'processed_data': {}
-    }
-    
-    print("   ✅ Mock data creato")
-    
-    # 2. Test JSON generation
-    print("\n2. Test JSON Generation...")
-    json_content = generate_json_report(mock_result)
-    print(f"   ✅ JSON generato: {len(json_content)} chars")
-    print(f"\n   Preview (prime 200 chars):")
-    print(f"   {json_content[:200]}...")
-    
-    # 3. Test JSON save
-    print("\n3. Test JSON Save...")
-    json_path = save_json_report(json_content, 'test_report.json')
-    print(f"   ✅ Salvato in: {json_path}")
-    
-    # 4. Test HTML generation (senza charts)
-    print("\n4. Test HTML Generation (mock charts)...")
-    mock_charts = {
-        'SPY': '<div>SPY Chart Placeholder</div>',
-        'QQQ': '<div>QQQ Chart Placeholder</div>',
-        'XLK': '<div>XLK Chart Placeholder</div>'
-    }
-    
-    html_content = generate_html_report(mock_result, mock_charts)
-    print(f"   ✅ HTML generato: {len(html_content)} chars")
-    
-    # 5. Test HTML save
-    print("\n5. Test HTML Save...")
-    html_path = save_html_report(html_content, 'test_report.html')
-    print(f"   ✅ Salvato in: {html_path}")
-    
-    # 6. Test load JSON
-    print("\n6. Test Load JSON...")
-    loaded_data = load_json_report(json_path)
-    print(f"   ✅ JSON caricato: {len(loaded_data)} keys")
-    
-    # 7. Test summary extraction
-    print("\n7. Test Summary Extraction...")
-    summary = get_report_summary(loaded_data)
-    print("   Summary:")
-    for key, value in summary.items():
-        print(f"      {key}: {value}")
-    
-    print("\n" + "="*70)
-    print("✅ Test completato con successo!")
-    print("\nFile generati:")
-    print(f"   - {json_path}")
-    print(f"   - {html_path}")
-    print("\nApri test_report.html nel browser per vedere il report.")
+    print("Report Generator Test")
