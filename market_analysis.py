@@ -2,11 +2,11 @@
 """
 ============================================================================
 KRITERION QUANT - Daily Market Analysis System
-Market Analysis Module (Hybrid Logic Aligned)
+Market Analysis Module (Enhanced Signals)
 ============================================================================
 Orchestrazione completa del sistema:
 - Market Regime Detection (VIX + SPY trend)
-- Signal Generation (Allineata con Pattern Score del Notebook)
+- Signal Generation (Breaking + Testing logic)
 - Consolidamento dati per report (JSON/HTML)
 - Master analysis function
 
@@ -124,8 +124,7 @@ def detect_market_regime(
 
 def generate_signals(df: pd.DataFrame, ticker: str) -> List[str]:
     """
-    Genera segnali operativi per un ticker.
-    Utilizza i livelli pre-calcolati (Pattern Score logic) per coerenza.
+    Genera segnali operativi avanzati (Breaking & Testing).
     """
     if df.empty or len(df) < 5:
         return []
@@ -135,22 +134,44 @@ def generate_signals(df: pd.DataFrame, ticker: str) -> List[str]:
     prev = df.iloc[-2]
     
     try:
-        # 1. Price Breakout Signals (Pattern Logic Aligned)
+        close = last['Close']
+        high = last['High']
+        low = last['Low']
+        
+        # 1. Price Levels (Breaking & Testing)
         # Usa le colonne pre-calcolate da technical_indicators.py
         pwh = last.get('prev_week_high')
         pwl = last.get('prev_week_low')
         pdh = last.get('prev_day_high')
         pdl = last.get('prev_day_low')
-        close = last['Close']
         
-        if not pd.isna(pwh) and close > pwh:
-            signals.append("Breaking above weekly high")
-        if not pd.isna(pwl) and close < pwl:
-            signals.append("Breaking below weekly low")
-        if not pd.isna(pdh) and close > pdh:
-            signals.append("Breaking above daily high")
-        if not pd.isna(pdl) and close < pdl:
-            signals.append("Breaking below daily low")
+        # Weekly High
+        if not pd.isna(pwh):
+            if close > pwh:
+                signals.append("Breaking above weekly high")
+            elif high > pwh:
+                signals.append("Testing weekly high")
+        
+        # Weekly Low
+        if not pd.isna(pwl):
+            if close < pwl:
+                signals.append("Breaking below weekly low")
+            elif low < pwl:
+                signals.append("Testing weekly low")
+        
+        # Daily High
+        if not pd.isna(pdh):
+            if close > pdh:
+                signals.append("Breaking above daily high")
+            elif high > pdh:
+                signals.append("Testing daily high")
+        
+        # Daily Low
+        if not pd.isna(pdl):
+            if close < pdl:
+                signals.append("Breaking below daily low")
+            elif low < pdl:
+                signals.append("Testing daily low")
         
         # 2. RSI Signals
         if 'RSI' in df.columns and not pd.isna(last['RSI']):
@@ -165,15 +186,22 @@ def generate_signals(df: pd.DataFrame, ticker: str) -> List[str]:
             elif rsi <= CONFIG['RSI_OVERSOLD']:
                 signals.append(f"RSI Oversold ({rsi:.1f})")
         
-        # 3. Bollinger Band Signals
-        if all(col in df.columns for col in ['BB_upper', 'BB_lower', 'Close']):
-            if not any(pd.isna([last['BB_upper'], last['BB_lower']])):
-                # Breakout sopra
-                if close > last['BB_upper']:
+        # 3. Bollinger Band Signals (Breaking & Testing)
+        if all(col in df.columns for col in ['BB_upper', 'BB_lower']):
+            bb_upper = last['BB_upper']
+            bb_lower = last['BB_lower']
+            
+            if not pd.isna(bb_upper):
+                if close > bb_upper:
                     signals.append("BB Upper Breakout")
-                # Breakout sotto
-                elif close < last['BB_lower']:
+                elif high >= bb_upper * 0.995: # Within 0.5%
+                    signals.append("Testing upper Bollinger Band")
+            
+            if not pd.isna(bb_lower):
+                if close < bb_lower:
                     signals.append("BB Lower Breakout")
+                elif low <= bb_lower * 1.005:
+                    signals.append("Testing lower Bollinger Band")
         
         # 4. Volume Surge
         if 'Volume_ratio' in df.columns and not pd.isna(last['Volume_ratio']):
@@ -190,9 +218,9 @@ def generate_signals(df: pd.DataFrame, ticker: str) -> List[str]:
         # 6. MACD Crossover
         if all(col in df.columns for col in ['MACD', 'MACD_signal']):
             if prev['MACD'] < prev['MACD_signal'] and last['MACD'] > last['MACD_signal']:
-                signals.append("MACD Bullish Crossover")
+                signals.append("Bullish MACD crossover")
             elif prev['MACD'] > prev['MACD_signal'] and last['MACD'] < last['MACD_signal']:
-                signals.append("MACD Bearish Crossover")
+                signals.append("Bearish MACD crossover")
         
         # 7. SMA Crossover (Golden/Death Cross)
         if all(col in df.columns for col in ['SMA_50', 'SMA_200']):
