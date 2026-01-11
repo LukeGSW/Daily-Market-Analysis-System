@@ -15,7 +15,7 @@ Include template Jinja2 per rendering HTML con stile Kriterion Quant.
 import json
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, Optional
 import logging
 from pathlib import Path
@@ -43,31 +43,49 @@ def convert_types(obj):
     Returns:
         Oggetto convertito
     """
-    if isinstance(obj, np.integer):
+    # Gestione Interi NumPy
+    if isinstance(obj, (np.int_, np.intc, np.intp, np.int8,
+        np.int16, np.int32, np.int64, np.uint8,
+        np.uint16, np.uint32, np.uint64, np.integer)):
         return int(obj)
-    elif isinstance(obj, np.floating):
+    
+    # Gestione Float NumPy
+    elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64, np.floating)):
         return float(obj)
+    
+    # Gestione Booleani NumPy (IL FIX CHE MANCAVA)
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    
+    # Gestione Array NumPy
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
-    elif isinstance(obj, pd.Timestamp):
+    
+    # Gestione Date (Pandas Timestamp, datetime, date)
+    elif isinstance(obj, (pd.Timestamp, datetime, date)):
         return obj.isoformat()
+    
+    # Gestione Pandas Series/DataFrame
     elif isinstance(obj, pd.Series):
         return obj.to_dict()
     elif isinstance(obj, pd.DataFrame):
         return obj.to_dict('records')
+    
+    # Gestione NaN/None
     elif pd.isna(obj):
         return None
+        
     return obj
 
-def clean_dict_for_json(data: Dict) -> Dict:
+def clean_dict_for_json(data: Any) -> Any:
     """
-    Pulisce ricorsivamente dict per JSON serialization.
+    Pulisce ricorsivamente strutture dati per JSON serialization.
     
     Args:
-        data: Dict da pulire
+        data: Dict, List o valore da pulire
     
     Returns:
-        Dict pulito
+        Struttura pulita con tipi nativi
     """
     if isinstance(data, dict):
         return {k: clean_dict_for_json(v) for k, v in data.items()}
@@ -97,27 +115,35 @@ def generate_json_report(analysis_result: Dict) -> str:
     """
     logger.info("📄 Generazione JSON report...")
     
-    # Rimuovi processed_data (troppo grande per JSON)
+    # Seleziona le sezioni rilevanti (escludendo DataFrame pesanti se presenti in processed_data)
+    # processed_data solitamente contiene DF che non vogliamo nel JSON di sintesi, 
+    # ma se servissero per l'LLM, andrebbero convertiti. Per ora manteniamo la struttura snella.
     report_data = {
         'metadata': analysis_result.get('metadata', {}),
         'market_regime': analysis_result.get('market_regime', {}),
         'instruments': analysis_result.get('instruments', {}),
-        'rankings': analysis_result.get('rankings', {})
+        'rankings': analysis_result.get('rankings', {}),
+        'notable_events': analysis_result.get('notable_events', []) # Aggiunto se presente
     }
     
-    # Clean per JSON serialization
-    report_data_clean = clean_dict_for_json(report_data)
-    
-    # Serialize con indentazione
-    json_string = json.dumps(
-        report_data_clean,
-        indent=CONFIG.get('JSON_INDENT', 2),
-        ensure_ascii=False
-    )
-    
-    logger.info(f"✅ JSON report generato: {len(json_string)} caratteri")
-    
-    return json_string
+    try:
+        # Clean per JSON serialization (con gestione errori)
+        report_data_clean = clean_dict_for_json(report_data)
+        
+        # Serialize con indentazione
+        json_string = json.dumps(
+            report_data_clean,
+            indent=CONFIG.get('JSON_INDENT', 2),
+            ensure_ascii=False
+        )
+        
+        logger.info(f"✅ JSON report generato: {len(json_string)} caratteri")
+        return json_string
+        
+    except Exception as e:
+        logger.error(f"❌ Errore critico generazione JSON: {str(e)}")
+        # Ritorna un JSON di errore valido per non rompere la UI
+        return json.dumps({"error": f"JSON generation failed: {str(e)}"})
 
 def save_json_report(json_string: str, filepath: str = None) -> str:
     """
@@ -628,7 +654,7 @@ if __name__ == "__main__":
     
     # 3. Test JSON save
     print("\n3. Test JSON Save...")
-    json_path = save_json_report(json_content, '/home/claude/test_report.json')
+    json_path = save_json_report(json_content, 'test_report.json')
     print(f"   ✅ Salvato in: {json_path}")
     
     # 4. Test HTML generation (senza charts)
@@ -644,7 +670,7 @@ if __name__ == "__main__":
     
     # 5. Test HTML save
     print("\n5. Test HTML Save...")
-    html_path = save_html_report(html_content, '/home/claude/test_report.html')
+    html_path = save_html_report(html_content, 'test_report.html')
     print(f"   ✅ Salvato in: {html_path}")
     
     # 6. Test load JSON
