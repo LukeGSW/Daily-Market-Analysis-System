@@ -1,0 +1,250 @@
+# ============================================================================
+# KRITERION QUANT - Daily Market Analysis System
+# .gitignore - File da escludere dal version control
+# ============================================================================
+
+# --- SECRETS & CREDENTIALS ---
+# CRITICAL: Never commit API keys or tokens
+.streamlit/secrets.toml
+secrets.toml
+.env
+.env.local
+.env.*.local
+config_local.py
+credentials.json
+api_keys.txt
+*.key
+*.pem
+
+# --- PYTHON ---
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.hypothesis/
+.pytest_cache/
+junit.xml
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv
+.ENV
+.env
+virtualenv/
+pipenv/
+
+# --- STREAMLIT ---
+# Streamlit cache and temp files
+.streamlit/cache/
+.streamlit/credentials.toml
+.streamlit/*.cache
+
+# --- DATA & OUTPUTS ---
+# Generated reports and data files (optional - uncomment if you want to track them)
+# *.json
+# *.html
+# data/*.json
+# data/*.html
+
+# Temporary data files
+*.tmp
+*.temp
+*_temp.json
+*_temp.html
+*_backup.*
+
+# Large datasets
+*.csv.gz
+*.parquet
+*.hdf5
+*.h5
+
+# Logs
+logs/
+*.log
+log_*.txt
+
+# --- IDE & EDITORS ---
+# VSCode
+.vscode/
+*.code-workspace
+.history/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# --- OPERATING SYSTEM ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# --- ARCHIVES ---
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# --- MISC ---
+# Backup files
+*.bak
+*.backup
+*.old
+*_old.*
+
+# Draft files
+*_draft.*
+draft_*
+
+# Test files
+test_output/
+scratch/
+sandbox/
+
+# Node modules (if using any JS tools)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# --- PROJECT SPECIFIC ---
+# Temporary analysis files
+analysis_temp/
+temp_charts/
+debug_output/
+
+# Local configuration overrides
+config_override.py
+local_settings.py
+
+# Downloaded data cache (optional - uncomment to ignore)
+# cache/
+# .cache/
+# data_cache/
+
+# GitHub Actions artifacts (local testing)
+.github/workflows/test_results/
+
+# Old versions / deprecated files
+deprecated/
+old_versions/
+archive/
+
+# ============================================================================
+# NOTES:
+# ============================================================================
+# 1. ALWAYS keep secrets.toml and .env files private
+# 2. Generated JSON/HTML reports: decide if you want to track them in git
+#    - If YES: comment out *.json and *.html lines
+#    - If NO: leave as is (recommended for large files)
+# 3. Cache files: excluded by default for cleaner repo
+# 4. Test outputs: excluded to avoid clutter
+# ============================================================================
+
+# End of .gitignore
