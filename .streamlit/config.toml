@@ -1,0 +1,251 @@
+# ============================================================================
+# KRITERION QUANT - Daily Market Analysis System
+# Streamlit Configuration File
+# ============================================================================
+# Questo file configura l'aspetto e il comportamento dell'app Streamlit.
+# 
+# Posizione: .streamlit/config.toml
+# 
+# Riferimenti:
+# - https://docs.streamlit.io/library/advanced-features/configuration
+# - https://docs.streamlit.io/library/advanced-features/theming
+# ============================================================================
+
+# ============================================================================
+# THEME CONFIGURATION
+# ============================================================================
+# Tema personalizzato con colori brand Kriterion Quant
+
+[theme]
+# Primary color (main elements, buttons, links)
+primaryColor = "#38a169"  # Verde accento Kriterion
+
+# Background color (main area)
+backgroundColor = "#f7fafc"  # Grigio chiaro neutro
+
+# Secondary background color (sidebar, code blocks)
+secondaryBackgroundColor = "#ffffff"  # Bianco puro
+
+# Text color
+textColor = "#2d3748"  # Grigio scuro leggibile
+
+# Font family
+font = "sans serif"  # Font pulito e professionale
+
+# Base theme (light/dark) - Override con colori custom sopra
+base = "light"
+
+# ============================================================================
+# SERVER CONFIGURATION
+# ============================================================================
+
+[server]
+# Port (default: 8501)
+port = 8501
+
+# Enable CORS (Cross-Origin Resource Sharing)
+enableCORS = false
+
+# Enable XSRF protection
+enableXsrfProtection = true
+
+# Max upload size in MB (default: 200)
+maxUploadSize = 200
+
+# Max message size in MB (default: 200)
+maxMessageSize = 200
+
+# Enable WebSocket compression
+enableWebsocketCompression = true
+
+# Run server in headless mode (no browser auto-open)
+# Utile per deployment
+headless = false
+
+# Server address (0.0.0.0 for all interfaces, localhost for local only)
+address = "localhost"
+
+# ============================================================================
+# BROWSER CONFIGURATION
+# ============================================================================
+
+[browser]
+# Gather usage statistics
+gatherUsageStats = false
+
+# Server address for browser (optional, auto-detect default)
+# serverAddress = "localhost"
+
+# Server port for browser
+serverPort = 8501
+
+# ============================================================================
+# RUNNER CONFIGURATION
+# ============================================================================
+
+[runner]
+# Script runner to use (asyncio is default)
+# Options: "asyncio", "threaded"
+runner = "asyncio"
+
+# Magic commands enabled (e.g., variable inspection)
+magicEnabled = true
+
+# Install Tracer for better error messages
+installTracer = false
+
+# Fix matplotlib rendering issues
+fixMatplotlib = true
+
+# Post script run behavior
+# Options: "always", "on_success", "on_failure", "never"
+postScriptGC = "always"
+
+# Fast rerun (skip some checks for faster refresh)
+fastReruns = true
+
+# Enforce serializable session state
+enforceSerializableSessionState = false
+
+# ============================================================================
+# CLIENT CONFIGURATION
+# ============================================================================
+
+[client]
+# Toolbar mode
+# Options: "auto", "developer", "viewer", "minimal"
+toolbarMode = "auto"
+
+# Show error details
+showErrorDetails = true
+
+# Show traceback on errors
+showTracebackOnError = true
+
+# ============================================================================
+# LOGGER CONFIGURATION
+# ============================================================================
+
+[logger]
+# Logging level
+# Options: "debug", "info", "warning", "error", "critical"
+level = "info"
+
+# Message format
+messageFormat = "%(asctime)s %(levelname)s: %(message)s"
+
+# Enable color output in logs
+enableRich = true
+
+# ============================================================================
+# DEPRECATION WARNINGS
+# ============================================================================
+
+[deprecation]
+# Show deprecation warnings
+showPyplotGlobalUse = false
+
+# Show file uploader encoding warning
+showfileUploaderEncoding = false
+
+# ============================================================================
+# MAPBOX CONFIGURATION (if using maps)
+# ============================================================================
+
+# [mapbox]
+# Mapbox token (uncomment and add if using st.map with Mapbox)
+# token = "your_mapbox_token_here"
+
+# ============================================================================
+# GLOBAL CONFIGURATION
+# ============================================================================
+
+[global]
+# Development mode (enables hot-reloading)
+developmentMode = false
+
+# Show warning when using experimental features
+showWarningOnDirectExecution = true
+
+# Data frame serialization
+# Options: "legacy", "arrow"
+dataFrameSerialization = "arrow"
+
+# ============================================================================
+# UI CONFIGURATION
+# ============================================================================
+
+[ui]
+# Hide the hamburger menu (top-right)
+hideTopBar = false
+
+# Hide the footer "Made with Streamlit"
+hideSidebarNav = false
+
+# ============================================================================
+# CUSTOM CSS (via theme)
+# ============================================================================
+# Nota: Per CSS personalizzato avanzato, usa st.markdown() con unsafe_allow_html
+# Esempio in app.py:
+# 
+# st.markdown("""
+# <style>
+#     .stApp {
+#         max-width: 1400px;
+#         margin: 0 auto;
+#     }
+#     h1 {
+#         color: #1a365d;
+#         font-weight: 800;
+#     }
+# </style>
+# """, unsafe_allow_html=True)
+
+# ============================================================================
+# PERFORMANCE TUNING
+# ============================================================================
+
+# [runner]
+# Faster refresh durante development
+# fastReruns = true
+
+# [server]
+# Abilita compression per payload grandi
+# enableWebsocketCompression = true
+
+# [client]
+# Timeout per connessione WebSocket (secondi)
+# timeout = 30
+
+# ============================================================================
+# NOTES
+# ============================================================================
+# 
+# 1. COLORI BRAND KRITERION QUANT:
+#    - Primary (Green): #38a169
+#    - Background: #f7fafc
+#    - Text: #2d3748
+#    - Secondary BG: #ffffff
+#
+# 2. DEPLOYMENT:
+#    - Per Streamlit Cloud: questo file è auto-caricato
+#    - Per server custom: copia in .streamlit/config.toml
+#
+# 3. OVERRIDE:
+#    - Flags command line override questo file
+#    - Esempio: streamlit run app.py --server.port 8502
+#
+# 4. ENVIRONMENT VARIABLES:
+#    - Puoi override con env vars: STREAMLIT_SERVER_PORT=8502
+#    - Formato: STREAMLIT_<SECTION>_<KEY>=<VALUE>
+#
+# 5. SECRETS:
+#    - Secrets separati in secrets.toml (NON in questo file)
+#    - .streamlit/secrets.toml per API keys, tokens, etc.
+#
+# 6. TESTING:
+#    - Test config locale: streamlit run app.py
+#    - Verifica colori tema nell'interfaccia
+#    - Check console per warnings/errori
+#
+# ============================================================================
