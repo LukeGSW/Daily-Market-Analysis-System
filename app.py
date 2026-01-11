@@ -227,7 +227,10 @@ def render_market_regime(market_regime):
     
     # VIX
     with col1:
-        vix_level = market_regime.get('vix_level', 0)
+        # FIX: Gestione sicura del valore VIX (può essere None se il download fallisce)
+        raw_vix = market_regime.get('vix_level')
+        vix_level = float(raw_vix) if raw_vix is not None else 0.0
+        
         vix_regime = market_regime.get('vix_regime', 'unknown').upper()
         
         # Color based on regime
@@ -323,7 +326,8 @@ def render_rankings(rankings):
                 'Momentum': '{:.0f}'
             })
             
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            # FIX: width="stretch" invece di use_container_width=True
+            st.dataframe(styled_df, width="stretch", hide_index=True)
         else:
             st.warning("No data available")
     
@@ -355,7 +359,8 @@ def render_rankings(rankings):
                 'Momentum': '{:.0f}'
             })
             
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            # FIX: width="stretch" invece di use_container_width=True
+            st.dataframe(styled_df, width="stretch", hide_index=True)
         else:
             st.warning("No data available")
 
@@ -415,7 +420,8 @@ def render_instrument_detail(ticker, data, processed_df):
     if processed_df is not None and not processed_df.empty:
         try:
             fig = create_candlestick_chart(processed_df, ticker)
-            st.plotly_chart(fig, use_container_width=True)
+            # FIX: width="stretch" invece di use_container_width=True
+            st.plotly_chart(fig, width="stretch")
         except Exception as e:
             st.error(f"Error generating chart: {str(e)}")
     else:
@@ -498,13 +504,15 @@ def render_detailed_analysis(instruments, processed_data):
 def render_sidebar():
     """Render sidebar con controlli."""
     with st.sidebar:
+        # FIX: width="stretch" per immagine
         st.image("https://via.placeholder.com/200x80/1a365d/ffffff?text=KRITERION+QUANT", 
-                 use_container_width=True)
+                 width="stretch")
         
         st.header("⚙️ Controls")
         
         # Refresh button
-        if st.button("🔄 Refresh Data", type="primary", use_container_width=True):
+        # FIX: width="stretch" per bottoni
+        if st.button("🔄 Refresh Data", type="primary", width="stretch"):
             with st.spinner("Loading market data..."):
                 try:
                     # Clear cache
@@ -532,12 +540,13 @@ def render_sidebar():
             try:
                 json_content = generate_json_report(st.session_state.analysis_result)
                 
+                # FIX: width="stretch"
                 st.download_button(
                     label="📄 Download JSON",
                     data=json_content,
                     file_name=f"dma_data_{datetime.now().strftime('%Y-%m-%d')}.json",
                     mime="application/json",
-                    use_container_width=True
+                    width="stretch"
                 )
             except Exception as e:
                 st.error(f"Export error: {str(e)}")
@@ -554,7 +563,8 @@ def render_sidebar():
         if telegram_status['ready']:
             st.success("✅ Telegram configured")
             
-            if st.button("📤 Send Notification", use_container_width=True):
+            # FIX: width="stretch"
+            if st.button("📤 Send Notification", width="stretch"):
                 if st.session_state.analysis_result:
                     with st.spinner("Sending..."):
                         try:
@@ -626,7 +636,7 @@ def main():
             
             # Try to reload secrets
             try:
-               # import streamlit as st
+                import streamlit as st
                 st.write(f"st.secrets available: {hasattr(st, 'secrets')}")
                 if hasattr(st, 'secrets'):
                     st.write(f"st.secrets keys: {list(st.secrets.keys())}")
