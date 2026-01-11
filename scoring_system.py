@@ -2,15 +2,17 @@
 """
 ============================================================================
 KRITERION QUANT - Daily Market Analysis System
-Scoring System Module
+Scoring System Module (Hybrid Logic)
 ============================================================================
-Implementa sistema di scoring multi-dimensionale:
-- Trend Score (30%)
-- Momentum Score (30%)
-- Volatility Score (15% - invertito)
-- Relative Strength Score (25%)
+Implementa sistema di scoring allineato alla logica del Notebook "Daily Market Analysis",
+ma corretto matematicamente (SMA reali) e robusto.
 
-Ogni score è normalizzato 0-100, poi combinato con pesi configurabili.
+- Trend Score (30%): SMA Pos + ADX + ROC + Pattern (Breakouts)
+- Momentum Score (30%): RSI + MACD + ROC Composite
+- Volatility Score (15%): Invertito (ATR, BB, HVol)
+- Relative Strength Score (25%): Performance vs Benchmark
+
+Ogni score è normalizzato 0-100.
 ============================================================================
 """
 
@@ -28,95 +30,104 @@ from config import CONFIG, UNIVERSE
 logger = logging.getLogger(__name__)
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def normalize_val(val: float, min_val: float, max_val: float) -> float:
+    """Normalizza un valore tra 0 e 100 basandosi su un range min/max."""
+    if pd.isna(val): return 50.0
+    clipped = max(min(val, max_val), min_val)
+    return ((clipped - min_val) / (max_val - min_val)) * 100
+
+# ============================================================================
 # INDIVIDUAL SCORE CALCULATIONS
 # ============================================================================
 
 def calculate_trend_score(df: pd.DataFrame) -> float:
     """
-    Calcola Trend Score (0-100).
+    Calcola Trend Score (0-100) - Logica Ibrida (Notebook + Fixes).
     
     Componenti:
-    - Posizione prezzo vs SMA (20, 50, 125, 200)
-    - Slope delle SMA (trending up/down)
-    - SMA alignment (bullish/bearish configuration)
-    
-    Args:
-        df: DataFrame con SMA calcolate
-    
-    Returns:
-        Score 0-100 (100 = trend fortemente rialzista)
+    1. SMA Positioning (30%): Prezzo sopra le medie (20, 50, 125, 200).
+    2. ADX Strength/Dir (25%): Forza del trend.
+    3. ROC (25%): Momentum puro del prezzo (20 periodi).
+    4. Pattern (20%): Breakout settimanali/giornalieri (Logica Notebook).
     """
-    if df.empty or len(df) < 2:
-        return 50.0  # Neutral default
+    if df.empty or len(df) < 5:
+        return 50.0
     
     last = df.iloc[-1]
-    prev = df.iloc[-2]
-    
-    score = 0.0
-    max_score = 100.0
     
     try:
         price = last['Close']
         
-        # 1. Price vs SMA (40 punti)
-        sma_scores = []
-        for period in CONFIG['SMA_PERIODS']:
+        # 1. SMA Positioning (30%)
+        # +25 punti per ogni SMA superata (Logic Notebook corretta con SMA reali)
+        sma_points = 0
+        sma_count = 0
+        for period in CONFIG['SMA_PERIODS']: # [20, 50, 125, 200]
             col = f'SMA_{period}'
             if col in df.columns and not pd.isna(last[col]):
                 if price > last[col]:
-                    # Prezzo sopra SMA - calcola distanza percentuale
-                    distance = ((price - last[col]) / last[col]) * 100
-                    # Cap al 10% per evitare outlier
-                    sma_score = min(distance * 10, 10)  # Max 10 punti per SMA
-                    sma_scores.append(sma_score)
-                else:
-                    # Prezzo sotto SMA - penalità
-                    sma_scores.append(0)
+                    sma_points += 25
+                sma_count += 1
         
-        if sma_scores:
-            score += sum(sma_scores)  # Max 40 punti (4 SMA * 10)
+        # Normalizza se mancano alcune SMA
+        if sma_count > 0:
+            sma_comp = (sma_points / (sma_count * 25)) * 100
+        else:
+            sma_comp = 50.0
+            
+        # 2. ADX Direction (25%)
+        # Base 50 +/- forza ADX
+        adx = last.get('ADX', 20)
+        p_di = last.get('plus_DI', 0)
+        m_di = last.get('minus_DI', 0)
         
-        # 2. SMA Slope (30 punti)
-        # SMA in salita = bullish
-        slope_scores = []
-        for period in CONFIG['SMA_PERIODS']:
-            col = f'SMA_{period}'
-            if col in df.columns and not pd.isna(last[col]) and not pd.isna(prev[col]):
-                slope = ((last[col] - prev[col]) / prev[col]) * 100
-                # Normalizza slope: +1% = 7.5 punti
-                slope_score = min(max(slope * 750, 0), 7.5)
-                slope_scores.append(slope_score)
+        # Clamp ADX a 50 per evitare eccessi
+        adx_clamped = min(adx, 50)
+        direction = 1 if p_di > m_di else -1
         
-        if slope_scores:
-            score += sum(slope_scores)  # Max 30 punti (4 SMA * 7.5)
+        # Formula: 50 + (Strenght * Direction)
+        adx_comp = 50 + ((adx_clamped - 25) * 2 * direction)
+        adx_comp = max(0, min(100, adx_comp))
         
-        # 3. SMA Alignment (30 punti)
-        # Configurazione ideale: prezzo > SMA20 > SMA50 > SMA125 > SMA200
-        alignment_score = 0
-        sma_values = []
-        for period in CONFIG['SMA_PERIODS']:
-            col = f'SMA_{period}'
-            if col in df.columns and not pd.isna(last[col]):
-                sma_values.append(last[col])
+        # 3. ROC Score (25%)
+        # Usa ROC_20 come proxy principale, range +/- 10%
+        roc = last.get('ROC_20', 0)
+        roc_comp = normalize_val(roc, -10, 10)
         
-        if len(sma_values) >= 2:
-            # Check se sono in ordine decrescente (bullish)
-            is_aligned = all(sma_values[i] > sma_values[i+1] 
-                           for i in range(len(sma_values)-1))
-            if is_aligned:
-                alignment_score = 30
-            else:
-                # Partial credit per allineamento parziale
-                aligned_pairs = sum(1 for i in range(len(sma_values)-1) 
-                                  if sma_values[i] > sma_values[i+1])
-                alignment_score = (aligned_pairs / (len(sma_values)-1)) * 30
+        # 4. Pattern Score (20%) - Logica Notebook
+        # "Breakout Score" basato su livelli weekly/daily calcolati in tech_indicators
+        pattern_val = 50.0
         
-        score += alignment_score
+        pwh = last.get('prev_week_high')
+        pwl = last.get('prev_week_low')
+        pdh = last.get('prev_day_high')
+        pdl = last.get('prev_day_low')
+        pivot = last.get('pivot_point') # o 'Pivot'
         
-        # Normalizza a 0-100
-        normalized_score = min(max(score, 0), max_score)
+        # Gerarchia segnali
+        if not pd.isna(pwh) and price > pwh:
+            pattern_val = 100 # Breakout settimanale (Strong Bull)
+        elif not pd.isna(pdh) and price > pdh:
+            pattern_val = 75  # Breakout giornaliero
+        elif not pd.isna(pivot) and price > pivot:
+            pattern_val = 60  # Sopra Pivot
+        elif not pd.isna(pdl) and price < pdl:
+            pattern_val = 25  # Breakdown giornaliero
+        elif not pd.isna(pwl) and price < pwl:
+            pattern_val = 0   # Breakdown settimanale (Strong Bear)
+            
+        # SCORE FINALE PONDERATO
+        final_score = (
+            (sma_comp * 0.30) +
+            (adx_comp * 0.25) +
+            (roc_comp * 0.25) +
+            (pattern_val * 0.20)
+        )
         
-        return normalized_score
+        return min(max(final_score, 0), 100)
         
     except Exception as e:
         logger.warning(f"Errore calcolo trend score: {str(e)}")
@@ -127,181 +138,90 @@ def calculate_momentum_score(df: pd.DataFrame) -> float:
     Calcola Momentum Score (0-100).
     
     Componenti:
-    - RSI (not overbought/oversold = good)
-    - MACD (bullish crossover = good)
-    - ROC multi-period
-    
-    Args:
-        df: DataFrame con indicatori momentum
-    
-    Returns:
-        Score 0-100 (100 = momentum fortemente positivo)
+    1. RSI (35%): Diretto (0-100)
+    2. MACD (35%): Trend istogramma e crossover
+    3. ROC Composite (30%): Mix 10/20/60 periodi
     """
-    if df.empty:
-        return 50.0
-    
+    if df.empty: return 50.0
     last = df.iloc[-1]
-    score = 0.0
     
     try:
-        # 1. RSI Score (40 punti)
-        if 'RSI' in df.columns and not pd.isna(last['RSI']):
-            rsi = last['RSI']
-            
-            if 40 <= rsi <= 60:
-                # Range neutrale = massimo score
-                rsi_score = 40
-            elif 30 < rsi < 40 or 60 < rsi < 70:
-                # Range moderato
-                rsi_score = 30
-            elif 20 < rsi <= 30 or 70 <= rsi < 80:
-                # Vicino a oversold/overbought
-                rsi_score = 20
-            else:
-                # Estremi (< 20 o > 80) = basso score
-                rsi_score = 10
-            
-            score += rsi_score
+        # 1. RSI (35%)
+        rsi = last.get('RSI', 50)
+        rsi_score = rsi # RSI è già nativamente uno score 0-100
         
-        # 2. MACD Score (30 punti)
-        if all(col in df.columns for col in ['MACD', 'MACD_signal', 'MACD_histogram']):
-            macd = last['MACD']
-            signal = last['MACD_signal']
-            histogram = last['MACD_histogram']
-            
-            if not any(pd.isna([macd, signal, histogram])):
-                # MACD sopra signal = bullish
-                if macd > signal:
-                    macd_score = 20
-                    # Bonus se histogram in crescita
-                    if len(df) >= 2:
-                        prev_hist = df.iloc[-2]['MACD_histogram']
-                        if histogram > prev_hist:
-                            macd_score += 10
-                else:
-                    macd_score = 5
+        # 2. MACD (35%)
+        # Logica: Bullish > 50, Bearish < 50
+        macd = last.get('MACD', 0)
+        sig = last.get('MACD_signal', 0)
+        hist = last.get('MACD_histogram', 0)
+        
+        # Base score su Crossover
+        if macd > sig:
+            macd_base = 60
+            # Momentum bonus se istogramma cresce
+            if len(df) >= 2 and hist > df.iloc[-2].get('MACD_histogram', 0):
+                macd_base += 20 # Strong Momentum
+        else:
+            macd_base = 40
+            # Momentum malus se istogramma scende
+            if len(df) >= 2 and hist < df.iloc[-2].get('MACD_histogram', 0):
+                macd_base -= 20 # Strong Negative Momentum
                 
-                score += macd_score
+        macd_score = max(0, min(100, macd_base))
         
-        # 3. ROC Score (30 punti)
-        roc_scores = []
-        for period in CONFIG['ROC_PERIODS']:
-            col = f'ROC_{period}'
-            if col in df.columns and not pd.isna(last[col]):
-                roc = last[col]
-                # ROC positivo = good, normalizza
-                if roc > 0:
-                    # +5% ROC = 10 punti
-                    roc_score = min(roc * 2, 10)
-                else:
-                    # ROC negativo = 0 punti
-                    roc_score = 0
-                
-                roc_scores.append(roc_score)
+        # 3. ROC Composite (30%)
+        roc10 = last.get('ROC_10', 0)
+        roc20 = last.get('ROC_20', 0)
+        roc60 = last.get('ROC_60', 0)
         
-        if roc_scores:
-            score += sum(roc_scores)  # Max 30 punti (3 periodi * 10)
+        # Media pesata ROC
+        avg_roc = (roc10 * 0.5) + (roc20 * 0.3) + (roc60 * 0.2)
+        # Normalizza su range +/- 15%
+        roc_score = normalize_val(avg_roc, -15, 15)
         
-        # Normalizza a 0-100
-        normalized_score = min(max(score, 0), 100)
+        final_score = (
+            (rsi_score * 0.35) +
+            (macd_score * 0.35) +
+            (roc_score * 0.30)
+        )
         
-        return normalized_score
+        return min(max(final_score, 0), 100)
         
     except Exception as e:
-        logger.warning(f"Errore calcolo momentum score: {str(e)}")
+        logger.warning(f"Errore momentum score: {e}")
         return 50.0
 
 def calculate_volatility_score(df: pd.DataFrame) -> float:
     """
     Calcola Volatility Score (0-100).
-    
-    NOTA: Questo score è INVERTITO nel composite score.
-    Bassa volatilità = score alto (desiderabile per ridurre rischio).
-    
-    Componenti:
-    - ATR percentuale
-    - Bollinger Band width
-    - Historical Volatility
-    
-    Args:
-        df: DataFrame con indicatori volatilità
-    
-    Returns:
-        Score 0-100 (100 = bassa volatilità, stabile)
+    INVERTITO: 100 = Bassa Volatilità (Safe), 0 = Alta Volatilità (Risky).
     """
-    if df.empty:
-        return 50.0
-    
+    if df.empty: return 50.0
     last = df.iloc[-1]
-    score = 0.0
     
     try:
-        # 1. ATR Percentage Score (40 punti)
-        if 'ATR_pct' in df.columns and not pd.isna(last['ATR_pct']):
-            atr_pct = last['ATR_pct']
-            
-            # ATR < 1% = bassa volatilità = high score
-            # ATR > 5% = alta volatilità = low score
-            if atr_pct < 1.0:
-                atr_score = 40
-            elif atr_pct < 2.0:
-                atr_score = 30
-            elif atr_pct < 3.0:
-                atr_score = 20
-            elif atr_pct < 4.0:
-                atr_score = 10
-            else:
-                atr_score = 0
-            
-            score += atr_score
+        # 1. ATR % (40%)
+        atr_pct = last.get('ATR_pct', 2.0)
+        # < 1% = 100 punti, > 5% = 0 punti
+        atr_score = 100 - normalize_val(atr_pct, 1.0, 5.0)
         
-        # 2. Bollinger Band Width Score (30 punti)
-        if 'BB_width' in df.columns and not pd.isna(last['BB_width']):
-            bb_width = last['BB_width']
-            
-            # BB width < 3% = bassa volatilità
-            # BB width > 10% = alta volatilità
-            if bb_width < 3.0:
-                bb_score = 30
-            elif bb_width < 5.0:
-                bb_score = 20
-            elif bb_width < 7.0:
-                bb_score = 10
-            else:
-                bb_score = 0
-            
-            score += bb_score
+        # 2. BB Width (35%)
+        bbw = last.get('BB_width', 5.0)
+        # < 5% = 100 punti, > 15% = 0 punti
+        bb_score = 100 - normalize_val(bbw, 5.0, 15.0)
         
-        # 3. Historical Volatility Score (30 punti)
-        hvol_scores = []
-        for period in CONFIG['HVOL_PERIODS']:
-            col = f'HVol_{period}'
-            if col in df.columns and not pd.isna(last[col]):
-                hvol = last[col]
-                
-                # HVol < 15% = bassa volatilità annualizzata
-                # HVol > 50% = alta volatilità
-                if hvol < 15:
-                    hvol_score = 15
-                elif hvol < 25:
-                    hvol_score = 10
-                elif hvol < 35:
-                    hvol_score = 5
-                else:
-                    hvol_score = 0
-                
-                hvol_scores.append(hvol_score)
+        # 3. HVol (25%)
+        hvol = last.get('HVol_20', 15.0)
+        # < 10% = 100 punti, > 40% = 0 punti
+        hv_score = 100 - normalize_val(hvol, 10.0, 40.0)
         
-        if hvol_scores:
-            score += sum(hvol_scores)  # Max 30 punti (2 periodi * 15)
+        final_score = (atr_score * 0.40) + (bb_score * 0.35) + (hv_score * 0.25)
         
-        # Normalizza a 0-100
-        normalized_score = min(max(score, 0), 100)
-        
-        return normalized_score
+        return min(max(final_score, 0), 100)
         
     except Exception as e:
-        logger.warning(f"Errore calcolo volatility score: {str(e)}")
+        logger.warning(f"Errore volatility score: {e}")
         return 50.0
 
 def calculate_relative_strength_score(
@@ -311,25 +231,13 @@ def calculate_relative_strength_score(
 ) -> float:
     """
     Calcola Relative Strength Score vs Benchmark (0-100).
-    
-    Componenti:
-    - Return 1 mese vs benchmark
-    - Return 3 mesi vs benchmark
-    - Correlation con benchmark
-    
-    Args:
-        df: DataFrame ticker
-        benchmark_df: DataFrame benchmark
-        ticker: Nome ticker (per logging)
-    
-    Returns:
-        Score 0-100 (100 = outperformance massima vs benchmark)
+    Logica robusta basata su Differenziale Rendimenti.
     """
     if df.empty or benchmark_df is None or benchmark_df.empty:
         return 50.0
     
     try:
-        # Allinea date tra ticker e benchmark
+        # Allinea date
         merged = pd.merge(
             df[['Date', 'Close']].rename(columns={'Close': 'ticker_close'}),
             benchmark_df[['Date', 'Close']].rename(columns={'Close': 'bench_close'}),
@@ -337,82 +245,45 @@ def calculate_relative_strength_score(
             how='inner'
         )
         
-        if len(merged) < 63:  # Minimo per calcolare 3 mesi
-            return 50.0
+        if len(merged) < 63: return 50.0
         
         score = 0.0
         
-        # 1. Relative Return 1 mese (21 giorni) - 40 punti
-        if len(merged) >= 21:
-            ticker_ret_1m = ((merged['ticker_close'].iloc[-1] - 
-                            merged['ticker_close'].iloc[-21]) / 
-                           merged['ticker_close'].iloc[-21]) * 100
-            bench_ret_1m = ((merged['bench_close'].iloc[-1] - 
-                           merged['bench_close'].iloc[-21]) / 
-                          merged['bench_close'].iloc[-21]) * 100
-            
-            rel_ret_1m = ticker_ret_1m - bench_ret_1m
-            
-            # Outperformance > 5% = max score
-            if rel_ret_1m > 5:
-                score += 40
-            elif rel_ret_1m > 2:
-                score += 30
-            elif rel_ret_1m > 0:
-                score += 20
-            elif rel_ret_1m > -2:
-                score += 10
-            else:
-                score += 0
+        # 1. Relative Return 1 mese (40%)
+        t_ret_1m = merged['ticker_close'].pct_change(21).iloc[-1] * 100
+        b_ret_1m = merged['bench_close'].pct_change(21).iloc[-1] * 100
+        diff_1m = t_ret_1m - b_ret_1m
         
-        # 2. Relative Return 3 mesi (63 giorni) - 40 punti
-        if len(merged) >= 63:
-            ticker_ret_3m = ((merged['ticker_close'].iloc[-1] - 
-                            merged['ticker_close'].iloc[-63]) / 
-                           merged['ticker_close'].iloc[-63]) * 100
-            bench_ret_3m = ((merged['bench_close'].iloc[-1] - 
-                           merged['bench_close'].iloc[-63]) / 
-                          merged['bench_close'].iloc[-63]) * 100
+        # > +5% diff = 40 punti, < -5% = 0 punti
+        score_1m = normalize_val(diff_1m, -5, 5) * 0.4 # max 40
+        score += score_1m
+        
+        # 2. Relative Return 3 mesi (40%)
+        t_ret_3m = merged['ticker_close'].pct_change(63).iloc[-1] * 100
+        b_ret_3m = merged['bench_close'].pct_change(63).iloc[-1] * 100
+        diff_3m = t_ret_3m - b_ret_3m
+        
+        # > +10% diff = 40 punti
+        score_3m = normalize_val(diff_3m, -10, 10) * 0.4 # max 40
+        score += score_3m
+        
+        # 3. Correlazione (20%)
+        # Premia decorrelazione moderata (diversificazione)
+        corr = merged['ticker_close'].pct_change().corr(merged['bench_close'].pct_change())
+        
+        if 0.5 <= corr <= 0.8:
+            corr_score = 20 # Sweet spot
+        elif 0.2 <= corr < 0.5 or 0.8 < corr <= 0.9:
+            corr_score = 10
+        else:
+            corr_score = 5 # Troppo correlato o correlazione negativa estrema
             
-            rel_ret_3m = ticker_ret_3m - bench_ret_3m
-            
-            # Outperformance > 10% = max score
-            if rel_ret_3m > 10:
-                score += 40
-            elif rel_ret_3m > 5:
-                score += 30
-            elif rel_ret_3m > 0:
-                score += 20
-            elif rel_ret_3m > -5:
-                score += 10
-            else:
-                score += 0
+        score += corr_score
         
-        # 3. Beta/Correlation (20 punti)
-        # Beta < 1 = meno volatile del mercato (bonus)
-        ticker_returns = merged['ticker_close'].pct_change().dropna()
-        bench_returns = merged['bench_close'].pct_change().dropna()
-        
-        if len(ticker_returns) > 20:
-            correlation = ticker_returns.corr(bench_returns)
-            
-            # Correlation moderata = diversification benefit
-            if 0.5 <= correlation <= 0.8:
-                score += 20
-            elif 0.3 <= correlation < 0.5 or 0.8 < correlation <= 0.9:
-                score += 15
-            elif correlation > 0.9:
-                score += 10  # Troppo correlato
-            else:
-                score += 5   # Bassa/negativa correlation
-        
-        # Normalizza a 0-100
-        normalized_score = min(max(score, 0), 100)
-        
-        return normalized_score
+        return min(max(score, 0), 100)
         
     except Exception as e:
-        logger.warning(f"Errore calcolo relative strength score per {ticker}: {str(e)}")
+        logger.warning(f"Errore RS score per {ticker}: {e}")
         return 50.0
 
 # ============================================================================
@@ -426,27 +297,9 @@ def calculate_composite_score(
     relative_strength_score: float,
     weights: Dict[str, float] = None
 ) -> float:
-    """
-    Calcola Composite Score con pesi configurabili.
-    
-    Formula:
-    Composite = (Trend * w1) + (Momentum * w2) + (Volatility * w3) + (RelStrength * w4)
-    
-    Args:
-        trend_score: Score trend (0-100)
-        momentum_score: Score momentum (0-100)
-        volatility_score: Score volatility (0-100) - già invertito se necessario
-        relative_strength_score: Score relative strength (0-100)
-        weights: Dict pesi custom (default: da CONFIG)
-    
-    Returns:
-        Composite score (0-100)
-    """
+    """Calcola Composite Score con pesi configurabili."""
     if weights is None:
         weights = CONFIG['WEIGHTS']
-    
-    # NOTA: volatility_score è già "invertito" (alta volatilità = score basso)
-    # quindi non serve invertirlo qui
     
     composite = (
         trend_score * weights['TREND'] +
@@ -466,17 +319,7 @@ def score_instrument(
     ticker: str,
     benchmark_data: Dict[str, pd.DataFrame]
 ) -> Dict[str, float]:
-    """
-    Calcola tutti gli score per un singolo strumento.
-    
-    Args:
-        df: DataFrame strumento con indicatori calcolati
-        ticker: Symbol ticker
-        benchmark_data: Dict {ticker: DataFrame} con benchmark data
-    
-    Returns:
-        Dict con tutti gli score
-    """
+    """Calcola tutti gli score per un singolo strumento."""
     logger.info(f"📊 Scoring {ticker}...")
     
     # Recupera benchmark
@@ -520,16 +363,7 @@ def score_universe(
     data_dict: Dict[str, pd.DataFrame],
     progress_callback=None
 ) -> Dict[str, Dict[str, float]]:
-    """
-    Calcola score per tutti gli strumenti nell'universo.
-    
-    Args:
-        data_dict: Dict {ticker: DataFrame con indicatori}
-        progress_callback: Funzione callback(current, total, ticker)
-    
-    Returns:
-        Dict {ticker: scores_dict}
-    """
+    """Calcola score per tutti gli strumenti nell'universo."""
     logger.info(f"🚀 Scoring universe: {len(data_dict)} strumenti")
     
     all_scores = {}
@@ -545,30 +379,15 @@ def score_universe(
             
         except Exception as e:
             logger.error(f"❌ Errore scoring {ticker}: {str(e)}")
-            # Default neutral scores
             all_scores[ticker] = {
-                'composite': 50.0,
-                'trend': 50.0,
-                'momentum': 50.0,
-                'volatility': 50.0,
-                'relative_strength': 50.0
+                'composite': 50.0, 'trend': 50.0, 'momentum': 50.0,
+                'volatility': 50.0, 'relative_strength': 50.0
             }
-    
-    logger.info(f"✅ Scoring completato: {len(all_scores)} strumenti")
     
     return all_scores
 
 def generate_rankings(scores_dict: Dict[str, Dict[str, float]]) -> Dict[str, List]:
-    """
-    Genera ranking ordinati per vari criteri.
-    
-    Args:
-        scores_dict: Dict {ticker: scores}
-    
-    Returns:
-        Dict con liste ranking ordinate
-    """
-    # Converti in lista di dict per sorting
+    """Genera ranking ordinati per vari criteri."""
     items = []
     for ticker, scores in scores_dict.items():
         items.append({
@@ -595,43 +414,15 @@ def generate_rankings(scores_dict: Dict[str, Dict[str, float]]) -> Dict[str, Lis
 # ============================================================================
 
 def get_top_n(rankings: Dict[str, List], criterion: str = 'by_composite_score', n: int = 5) -> List:
-    """
-    Estrae top N ticker per criterio specifico.
-    
-    Args:
-        rankings: Dict da generate_rankings()
-        criterion: Chiave criterio ('by_composite_score', etc)
-        n: Numero ticker da estrarre
-    
-    Returns:
-        Lista top N ticker
-    """
+    """Estrae top N ticker per criterio."""
     return rankings.get(criterion, [])[:n]
 
 def get_bottom_n(rankings: Dict[str, List], criterion: str = 'by_composite_score', n: int = 5) -> List:
-    """
-    Estrae bottom N ticker per criterio specifico.
-    
-    Args:
-        rankings: Dict da generate_rankings()
-        criterion: Chiave criterio
-        n: Numero ticker da estrarre
-    
-    Returns:
-        Lista bottom N ticker
-    """
+    """Estrae bottom N ticker per criterio."""
     return rankings.get(criterion, [])[-n:]
 
 def get_score_distribution(scores_dict: Dict[str, Dict[str, float]]) -> Dict:
-    """
-    Calcola statistiche distribuzione score.
-    
-    Args:
-        scores_dict: Dict {ticker: scores}
-    
-    Returns:
-        Dict con stats (mean, median, std, min, max)
-    """
+    """Calcola statistiche distribuzione score."""
     composite_scores = [s['composite'] for s in scores_dict.values()]
     
     if not composite_scores:
@@ -652,11 +443,8 @@ def get_score_distribution(scores_dict: Dict[str, Dict[str, float]]) -> Dict:
 
 if __name__ == "__main__":
     print("="*70)
-    print("KRITERION QUANT - Scoring System Test")
+    print("KRITERION QUANT - Scoring System Test (Hybrid Logic)")
     print("="*70)
-    
-    # 1. Test calcolo score individuali
-    print("\n1. Test Score Individuali (dati sample):")
     
     # Crea sample DataFrame
     dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='D')
@@ -679,9 +467,12 @@ if __name__ == "__main__":
         'ATR_pct': 1.5,
         'BB_width': 4.0,
         'HVol_20': 18.0,
-        'HVol_60': 20.0
+        'HVol_60': 20.0,
+        'prev_week_high': 105,
+        'pivot_point': 100
     })
     
+    print("\n1. Test Score Individuali:")
     trend = calculate_trend_score(df_test)
     momentum = calculate_momentum_score(df_test)
     volatility = calculate_volatility_score(df_test)
@@ -690,49 +481,9 @@ if __name__ == "__main__":
     print(f"   Momentum Score:   {momentum:.2f}")
     print(f"   Volatility Score: {volatility:.2f}")
     
-    # 2. Test composite score
-    print("\n2. Test Composite Score:")
+    print("\n2. Test Composite:")
     composite = calculate_composite_score(trend, momentum, volatility, 50.0)
     print(f"   Composite Score:  {composite:.2f}")
     
-    # 3. Test weights personalizzati
-    print("\n3. Test Custom Weights:")
-    custom_weights = {
-        'TREND': 0.40,
-        'MOMENTUM': 0.30,
-        'VOLATILITY': 0.10,
-        'REL_STRENGTH': 0.20
-    }
-    composite_custom = calculate_composite_score(
-        trend, momentum, volatility, 50.0, custom_weights
-    )
-    print(f"   Composite (custom): {composite_custom:.2f}")
-    
-    # 4. Test ranking
-    print("\n4. Test Ranking Generation:")
-    sample_scores = {
-        'SPY': {'composite': 65, 'trend': 70, 'momentum': 60, 'volatility': 60, 'relative_strength': 0},
-        'QQQ': {'composite': 75, 'trend': 80, 'momentum': 70, 'volatility': 70, 'relative_strength': 80},
-        'GLD': {'composite': 55, 'trend': 50, 'momentum': 55, 'volatility': 80, 'relative_strength': 40},
-        'TLT': {'composite': 45, 'trend': 40, 'momentum': 45, 'volatility': 85, 'relative_strength': 35},
-        'IWM': {'composite': 70, 'trend': 75, 'momentum': 65, 'volatility': 65, 'relative_strength': 70},
-    }
-    
-    rankings = generate_rankings(sample_scores)
-    
-    print("\n   Top 3 by Composite Score:")
-    for item in get_top_n(rankings, n=3):
-        print(f"      {item['ticker']}: {item['composite']:.1f}")
-    
-    print("\n   Bottom 2 by Composite Score:")
-    for item in get_bottom_n(rankings, n=2):
-        print(f"      {item['ticker']}: {item['composite']:.1f}")
-    
-    # 5. Test distribuzione
-    print("\n5. Score Distribution Stats:")
-    stats = get_score_distribution(sample_scores)
-    for key, value in stats.items():
-        print(f"   {key:10s}: {value:.2f}")
-    
     print("\n" + "="*70)
-    print("✅ Test completato con successo")
+    print("✅ Test completato")
