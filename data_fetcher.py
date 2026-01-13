@@ -47,9 +47,17 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
     try:
         logger.info(f"📥 Fetching {ticker} via Yahoo Finance...")
         
-        # Yahoo Finance download
-        # Nota: yfinance scarica fino a end_date escluso.
-        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        # --- FIX APPLICATO QUI ---
+        # yfinance considera 'end' come esclusivo. 
+        # Se end_date è '2025-01-13' (Lunedì), yfinance si ferma al 12.
+        # Dobbiamo aggiungere 1 giorno per includere la data di 'end_date'.
+        
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        yf_end_date = (end_dt + timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # Usiamo yf_end_date invece di end_date
+        df = yf.download(ticker, start=start_date, end=yf_end_date, progress=False)
+        # -------------------------
         
         if df.empty:
             logger.warning(f"⚠️ Yahoo Finance ha restituito DataFrame vuoto per {ticker}")
