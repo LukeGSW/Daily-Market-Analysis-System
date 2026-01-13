@@ -238,20 +238,13 @@ def get_business_days_between(
     except Exception:
         return 0
 
+import pytz
+
 def get_date_n_days_ago(n: int, from_date: datetime = None) -> datetime:
-    """
-    Ritorna data N giorni fa.
-    
-    Args:
-        n: Numero giorni indietro
-        from_date: Data di partenza (default: oggi)
-    
-    Returns:
-        Data n giorni fa
-    """
     if from_date is None:
-        from_date = datetime.now()
-    
+        # Forza Timezone Rome/Europe per coerenza col mercato o tua posizione
+        tz = pytz.timezone('Europe/Rome') 
+        from_date = datetime.now(tz)
     return from_date - timedelta(days=n)
 
 def is_market_open(date: datetime = None) -> bool:
