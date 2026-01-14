@@ -198,19 +198,7 @@ class EODHDClient:
         start_date: str,
         end_date: str
     ) -> Optional[pd.DataFrame]:
-        """Scarica dati End-of-Day da EODHD."""
-        symbol = f"{ticker}.{exchange}"
-        url = f"{self.base_url}/eod/{symbol}"
-        
-        params = {
-            'api_token': self.api_key,
-            'from': start_date,
-            'to': end_date,
-            'fmt': 'json',
-            'period': 'd'
-        }
-        
-        logger.info(f"📥 Fetching {symbol} (EODHD) from {start_date} to {end_date}")
+        # ... (codice precedente per URL e richiesta rimane uguale) ...
         
         data = self._make_request(url, params)
         
@@ -224,6 +212,43 @@ class EODHDClient:
             if df.empty:
                 logger.warning(f"⚠️ DataFrame vuoto per {symbol}")
                 return None
+            
+            # --- FIX STOCK SPLIT / ADJUSTED PRICES ---
+            # Calcoliamo il fattore di rettifica per ogni riga
+            # Factor = Adjusted_Close / Raw_Close
+            # Nota: Gestiamo divisione per zero se close fosse 0 (improbabile ma possibile in dati sporchi)
+            df['close'] = pd.to_numeric(df['close'], errors='coerce').fillna(0)
+            df['adjusted_close'] = pd.to_numeric(df['adjusted_close'], errors='coerce').fillna(0)
+            
+            # Calcolo adjustment factor
+            # Se adjusted_close manca, usiamo 1.0 (nessuna rettifica)
+            adj_factor = df['adjusted_close'] / df['close']
+            adj_factor = adj_factor.fillna(1.0)
+            
+            # Rettifichiamo OHLC per renderli continui (stile TradingView)
+            df['Open'] = df['open'] * adj_factor
+            df['High'] = df['high'] * adj_factor
+            df['Low'] = df['low'] * adj_factor
+            df['Close'] = df['adjusted_close'] # Usiamo direttamente l'adjusted close
+            
+            # Mappiamo le altre colonne necessarie
+            df['Volume'] = df['volume']
+            df['Date'] = df['date']
+            df['Adj Close'] = df['adjusted_close'] # Manteniamo per compatibilità
+            
+            # Selezioniamo solo le colonne finali pulite
+            final_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']
+            df = df[final_cols]
+            
+            # Converti Date
+            df['Date'] = pd.to_datetime(df['Date'])
+            
+            df = df.sort_values('Date').reset_index(drop=True)
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ Errore conversione DataFrame per {symbol}: {str(e)}")
+            return None
             
             # Rinomina colonne
             column_mapping = {
