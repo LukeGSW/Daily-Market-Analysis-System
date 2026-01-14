@@ -198,7 +198,19 @@ class EODHDClient:
         start_date: str,
         end_date: str
     ) -> Optional[pd.DataFrame]:
-        # ... (codice precedente per URL e richiesta rimane uguale) ...
+        """Scarica dati End-of-Day da EODHD."""
+        symbol = f"{ticker}.{exchange}"
+        url = f"{self.base_url}/eod/{symbol}"
+        
+        params = {
+            'api_token': self.api_key,
+            'from': start_date,
+            'to': end_date,
+            'fmt': 'json',
+            'period': 'd'
+        }
+        
+        logger.info(f"📥 Fetching {symbol} (EODHD) from {start_date} to {end_date}")
         
         data = self._make_request(url, params)
         
@@ -214,36 +226,37 @@ class EODHDClient:
                 return None
             
             # --- FIX STOCK SPLIT / ADJUSTED PRICES ---
-            # Calcoliamo il fattore di rettifica per ogni riga
-            # Factor = Adjusted_Close / Raw_Close
-            # Nota: Gestiamo divisione per zero se close fosse 0 (improbabile ma possibile in dati sporchi)
+            # 1. Convertiamo in numeri gestendo eventuali errori
             df['close'] = pd.to_numeric(df['close'], errors='coerce').fillna(0)
             df['adjusted_close'] = pd.to_numeric(df['adjusted_close'], errors='coerce').fillna(0)
+            df['open'] = pd.to_numeric(df['open'], errors='coerce').fillna(0)
+            df['high'] = pd.to_numeric(df['high'], errors='coerce').fillna(0)
+            df['low'] = pd.to_numeric(df['low'], errors='coerce').fillna(0)
             
-            # Calcolo adjustment factor
-            # Se adjusted_close manca, usiamo 1.0 (nessuna rettifica)
+            # 2. Calcoliamo il fattore di rettifica
+            # Se adjusted_close è presente, il fattore è (Adjusted / Raw). Altrimenti è 1.
+            # Questo abbasserà i prezzi storici pre-split per allinearli al prezzo attuale.
             adj_factor = df['adjusted_close'] / df['close']
             adj_factor = adj_factor.fillna(1.0)
             
-            # Rettifichiamo OHLC per renderli continui (stile TradingView)
+            # 3. Rettifichiamo OHLC
+            # Usiamo adjusted_close come 'Close' ufficiale
+            df['Close'] = df['adjusted_close']
+            # Rettifichiamo Open, High, Low proporzionalmente
             df['Open'] = df['open'] * adj_factor
             df['High'] = df['high'] * adj_factor
             df['Low'] = df['low'] * adj_factor
-            df['Close'] = df['adjusted_close'] # Usiamo direttamente l'adjusted close
             
-            # Mappiamo le altre colonne necessarie
-            df['Volume'] = df['volume']
-            df['Date'] = df['date']
-            df['Adj Close'] = df['adjusted_close'] # Manteniamo per compatibilità
+            # 4. Altre colonne
+            df['Date'] = pd.to_datetime(df['date'])
+            df['Volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
+            df['Adj Close'] = df['adjusted_close']
             
-            # Selezioniamo solo le colonne finali pulite
-            final_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']
-            df = df[final_cols]
-            
-            # Converti Date
-            df['Date'] = pd.to_datetime(df['Date'])
-            
+            # 5. Pulizia finale
+            # Selezioniamo solo le colonne standard richieste dal sistema
+            df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']]
             df = df.sort_values('Date').reset_index(drop=True)
+            
             return df
             
         except Exception as e:
