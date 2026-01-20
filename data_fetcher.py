@@ -9,7 +9,7 @@ Gestisce:
 - Download dati VIX da Yahoo Finance (Fallback/Override)
 - Rate limiting intelligente e Retry logic
 - Normalizzazione dati
-- LOGICA SMART T-1: Accetta la data odierna SOLO se il mercato NY è chiuso.
+- LOGICA SMART: Richiede dati fino a OGGI, ma li valida rigorosamente.
 ============================================================================
 """
 
@@ -48,18 +48,16 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
     try:
         logger.info(f"📥 Fetching {ticker} via Yahoo Finance (Max History)...")
         
-        # --- FIX: Usiamo history(period="10y") invece di date specifiche ---
+        # --- FIX: Usiamo history(period="10y") ---
         # Questo garantisce di avere l'ultima candela disponibile (anche di oggi)
-        # bypassando problemi di calcolo date e festività (es. MLK Day).
+        # bypassando problemi di calcolo date e festività.
         
-        # Gestione simbolo per Yahoo (aggiunge ^ se manca e se sembra un indice)
         yf_ticker_name = ticker
         if ticker == "VIX" or (ticker == "^VIX"):
             yf_ticker_name = "^VIX"
             
         ticker_obj = yf.Ticker(yf_ticker_name)
         df = ticker_obj.history(period="10y", auto_adjust=False)
-        # -------------------------------------------------------------------
         
         if df.empty:
             logger.warning(f"⚠️ Yahoo Finance ha restituito DataFrame vuoto per {ticker}")
@@ -75,13 +73,10 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
         # Assicurati formattazione Date e rimozione timezone
         df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
         
-        # Filtro manuale della data di inizio (la fine la lasciamo aperta per prendere l'ultimo dato)
+        # Filtro manuale della data di inizio
         df = df[df['Date'] >= pd.to_datetime(start_date)]
         
-        # Filtra e ordina colonne richieste
-        # Yahoo restituisce: Open, High, Low, Close, Volume (e a volte Adj Close separato)
-        
-        # Normalizzazione nomi colonne (Yahoo Capitalizza, noi vogliamo coerenza)
+        # Normalizzazione nomi colonne
         df = df.rename(columns={
             'Open': 'Open', 'High': 'High', 'Low': 'Low', 
             'Close': 'Close', 'Adj Close': 'Adj Close', 'Volume': 'Volume'
@@ -89,11 +84,11 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
 
         required_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
         
-        # Yahoo a volte non ha Volume per indici (es. VIX), gestiamo l'assenza
+        # Yahoo a volte non ha Volume per indici
         if 'Volume' not in df.columns:
             df['Volume'] = 0
             
-        # Aggiungi Adj Close se manca (copia Close)
+        # Aggiungi Adj Close se manca
         if 'Adj Close' not in df.columns:
             df['Adj Close'] = df['Close']
             
@@ -116,13 +111,9 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
 # ============================================================================
 
 class EODHDClient:
-    """
-    Client per interagire con EODHD API.
-    Gestisce rate limiting, retry e errori.
-    """
+    """Client per interagire con EODHD API."""
     
     def __init__(self, api_key: str = None):
-        """Inizializza client EODHD."""
         self.api_key = api_key or SECRETS.get('EODHD_API_KEY', '')
         
         if not self.api_key:
@@ -132,82 +123,39 @@ class EODHDClient:
         self.timeout = CONFIG['TIMEOUT']
         self.max_retries = CONFIG['MAX_RETRIES']
         
-        # Rate limiting settings
         self.request_delay_min = CONFIG['REQUEST_DELAY_MIN']
         self.request_delay_max = CONFIG['REQUEST_DELAY_MAX']
         self.last_request_time = 0
     
     def _apply_rate_limit(self):
-        """Applica rate limiting tra richieste."""
         elapsed = time.time() - self.last_request_time
         delay = random.uniform(self.request_delay_min, self.request_delay_max)
-        
         if elapsed < delay:
-            sleep_time = delay - elapsed
-            time.sleep(sleep_time)
-        
+            time.sleep(delay - elapsed)
         self.last_request_time = time.time()
     
     def _make_request(self, url: str, params: dict, attempt: int = 1) -> Optional[dict]:
-        """Esegue richiesta HTTP con retry logic."""
-        if not self.api_key:
-            return None
-
+        if not self.api_key: return None
         try:
             self._apply_rate_limit()
+            response = requests.get(url, params=params, timeout=self.timeout)
             
-            response = requests.get(
-                url,
-                params=params,
-                timeout=self.timeout
-            )
-            
-            # Check HTTP status
             if response.status_code == 200:
                 return response.json()
-            
-            elif response.status_code == 401:
-                logger.error(f"❌ 401 Unauthorized - Verifica EODHD_API_KEY")
-                return None
-            
-            elif response.status_code == 429:
-                wait_time = 60 * attempt
-                logger.warning(f"⚠️ Rate limit exceeded, wait {wait_time}s...")
-                time.sleep(wait_time)
-                if attempt < self.max_retries:
-                    return self._make_request(url, params, attempt + 1)
-                return None
-            
+            elif response.status_code == 429: # Rate limit
+                time.sleep(60 * attempt)
+                return self._make_request(url, params, attempt + 1) if attempt < self.max_retries else None
             elif response.status_code >= 500:
-                logger.warning(f"⚠️ Server error {response.status_code}, retry {attempt}/{self.max_retries}")
-                if attempt < self.max_retries:
-                    time.sleep(2 ** attempt)
-                    return self._make_request(url, params, attempt + 1)
-                return None
-            
+                time.sleep(2 ** attempt)
+                return self._make_request(url, params, attempt + 1) if attempt < self.max_retries else None
             else:
                 logger.error(f"❌ HTTP {response.status_code}: {response.text[:200]}")
                 return None
-                
-        except requests.Timeout:
-            logger.warning(f"⚠️ Timeout, retry {attempt}/{self.max_retries}")
-            if attempt < self.max_retries:
-                time.sleep(2 ** attempt)
-                return self._make_request(url, params, attempt + 1)
-            return None
-            
         except Exception as e:
             logger.error(f"❌ Errore richiesta: {str(e)}")
             return None
     
-    def get_eod_data(
-        self,
-        ticker: str,
-        exchange: str,
-        start_date: str,
-        end_date: str
-    ) -> Optional[pd.DataFrame]:
-        """Scarica dati End-of-Day da EODHD."""
+    def get_eod_data(self, ticker: str, exchange: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         symbol = f"{ticker}.{exchange}"
         url = f"{self.base_url}/eod/{symbol}"
         
@@ -220,121 +168,68 @@ class EODHDClient:
         }
         
         logger.info(f"📥 Fetching {symbol} (EODHD) from {start_date} to {end_date}")
-        
         data = self._make_request(url, params)
         
-        if not data:
-            logger.error(f"❌ Nessun dato ricevuto per {symbol}")
-            return None
+        if not data: return None
         
         try:
             df = pd.DataFrame(data)
+            if df.empty: return None
             
-            if df.empty:
-                logger.warning(f"⚠️ DataFrame vuoto per {symbol}")
-                return None
+            # Conversione numerica
+            for col in ['close', 'adjusted_close', 'open', 'high', 'low', 'volume']:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            # --- FIX STOCK SPLIT / ADJUSTED PRICES ---
-            # 1. Convertiamo in numeri gestendo eventuali errori
-            df['close'] = pd.to_numeric(df['close'], errors='coerce').fillna(0)
-            df['adjusted_close'] = pd.to_numeric(df['adjusted_close'], errors='coerce').fillna(0)
-            df['open'] = pd.to_numeric(df['open'], errors='coerce').fillna(0)
-            df['high'] = pd.to_numeric(df['high'], errors='coerce').fillna(0)
-            df['low'] = pd.to_numeric(df['low'], errors='coerce').fillna(0)
-            
-            # 2. Calcoliamo il fattore di rettifica
+            # Calcolo Adjusted Factor
             adj_factor = df['adjusted_close'] / df['close']
             adj_factor = adj_factor.fillna(1.0)
             
-            # 3. Rettifichiamo OHLC
+            # Rettifica OHLC
             df['Close'] = df['adjusted_close']
             df['Open'] = df['open'] * adj_factor
             df['High'] = df['high'] * adj_factor
             df['Low'] = df['low'] * adj_factor
             
-            # 4. Altre colonne
             df['Date'] = pd.to_datetime(df['date'])
-            df['Volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
+            df['Volume'] = df['volume']
             df['Adj Close'] = df['adjusted_close']
             
-            # 5. Pulizia finale
-            df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']]
-            df = df.sort_values('Date').reset_index(drop=True)
-            
-            return df
+            return df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']].sort_values('Date').reset_index(drop=True)
             
         except Exception as e:
             logger.error(f"❌ Errore conversione DataFrame per {symbol}: {str(e)}")
             return None
-    
-    def get_latest_quote(self, ticker: str, exchange: str) -> Optional[dict]:
-        """Ottiene ultima quotazione real-time."""
-        symbol = f"{ticker}.{exchange}"
-        url = f"{self.base_url}/real-time/{symbol}"
-        params = {'api_token': self.api_key, 'fmt': 'json'}
-        return self._make_request(url, params)
 
 # ============================================================================
 # HIGH-LEVEL FETCHING FUNCTIONS
 # ============================================================================
 
-def download_ticker_data(
-    ticker: str,
-    start_date: str,
-    end_date: str,
-    retries: int = 3
-) -> Optional[pd.DataFrame]:
-    """
-    Download dati per singolo ticker con logica Ibrida (EODHD + Yahoo).
-    """
-    # --- LOGICA IBRIDA ---
-    # Se il ticker è VIX, usiamo Yahoo Finance
+def download_ticker_data(ticker: str, start_date: str, end_date: str, retries: int = 3) -> Optional[pd.DataFrame]:
+    # VIX -> Yahoo
     if ticker == "^VIX" or ticker == "VIX":
         return fetch_from_yahoo(ticker, start_date, end_date)
     
-    # Per tutti gli altri, usiamo EODHD
+    # Altri -> EODHD
     ticker_info = UNIVERSE.get(ticker)
-    if not ticker_info:
-        logger.error(f"❌ Ticker {ticker} non trovato in UNIVERSE")
-        return None
+    if not ticker_info: return None
     
-    exchange = ticker_info.get('eodhd_exchange', 'US')
-    
-    # Inizializza client
     client = EODHDClient()
-    return client.get_eod_data(ticker, exchange, start_date, end_date)
+    return client.get_eod_data(ticker, ticker_info.get('eodhd_exchange', 'US'), start_date, end_date)
 
-def download_universe_data(
-    start_date: str,
-    end_date: str,
-    progress_callback=None
-) -> Dict[str, pd.DataFrame]:
-    """
-    Scarica dati per tutti i ticker dell'universo.
-    """
+def download_universe_data(start_date: str, end_date: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
     logger.info(f"🚀 Avvio download universo ({len(UNIVERSE)} ticker)")
-    
-    results = {}
-    failed = []
+    results, failed = {}, []
     tickers = list(UNIVERSE.keys())
-    total_tickers = len(tickers)
-    
-    # Batch processing parameters
-    batch_size = CONFIG['BATCH_SIZE']
-    batch_delay_min = CONFIG['BATCH_DELAY_MIN']
-    batch_delay_max = CONFIG['BATCH_DELAY_MAX']
     
     for i, ticker in enumerate(tickers, 1):
+        if progress_callback: progress_callback(i, len(tickers), ticker)
+        
         try:
-            if progress_callback:
-                progress_callback(i, total_tickers, ticker)
-            
-            # Download
             df = download_ticker_data(ticker, start_date, end_date)
             
             if df is not None and not df.empty:
                 # --- CRITICAL STEP: CLEAN & VALIDATE ---
-                # Pulisce i dati applicando la logica oraria per la data odierna
+                # Qui avviene la magia: df potrebbe contenere oggi, clean_dataframe decide se tenerlo
                 df = clean_dataframe(df)
                 
                 if validate_dataframe(df, ticker):
@@ -344,32 +239,26 @@ def download_universe_data(
             else:
                 failed.append(ticker)
             
-            # Batch delay
-            if i % batch_size == 0 and i < total_tickers:
-                delay = random.uniform(batch_delay_min, batch_delay_max)
-                logger.info(f"⏸️ Batch delay: {delay:.1f}s")
-                time.sleep(delay)
+            if i % CONFIG['BATCH_SIZE'] == 0:
+                time.sleep(random.uniform(CONFIG['BATCH_DELAY_MIN'], CONFIG['BATCH_DELAY_MAX']))
                 
         except Exception as e:
-            logger.error(f"❌ Errore download {ticker}: {str(e)}")
+            logger.error(f"❌ Errore download {ticker}: {e}")
             failed.append(ticker)
-    
-    # Summary
-    logger.info("="*70)
-    logger.info(f"✅ Download completato: {len(results)}/{total_tickers} ticker OK")
-    if failed:
-        logger.warning(f"⚠️ Failed: {', '.join(failed)}")
-    
+            
+    logger.info(f"✅ Download completato: {len(results)}/{len(tickers)} ticker OK")
     return results
 
 def get_date_range_for_analysis() -> Tuple[str, str]:
     """
     Calcola range date per analisi.
     """
-    # End date nominale = ieri (come fallback)
-    end_date = datetime.now() - timedelta(days=1)
+    # --- FIX CRUCIALE ---
+    # Prima era: datetime.now() - timedelta(days=1) -> Fermava la richiesta a Ieri.
+    # Ora è: datetime.now() -> Richiede fino a Oggi.
+    # Sarà poi 'clean_dataframe' a scartare Oggi se il mercato è aperto.
+    end_date = datetime.now()
     
-    # Start date = end_date - lookback
     lookback_days = CONFIG['DATA_LOOKBACK_DAYS']
     start_date = end_date - timedelta(days=lookback_days)
     
@@ -379,73 +268,36 @@ def get_date_range_for_analysis() -> Tuple[str, str]:
     )
 
 def validate_dataframe(df: pd.DataFrame, ticker: str) -> bool:
-    """Valida integrità DataFrame."""
-    if df is None or df.empty:
-        logger.warning(f"⚠️ {ticker}: DataFrame vuoto")
-        return False
-    
-    required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-    missing_cols = [col for col in required_columns if col not in df.columns]
-    
-    if missing_cols:
-        logger.warning(f"⚠️ {ticker}: Colonne mancanti: {missing_cols}")
-        return False
-    
-    if len(df) < CONFIG['MIN_REQUIRED_ROWS']:
-        logger.warning(f"⚠️ {ticker}: Solo {len(df)} righe (min {CONFIG['MIN_REQUIRED_ROWS']})")
-        return False
-    
+    if df is None or df.empty: return False
+    if len(df) < CONFIG['MIN_REQUIRED_ROWS']: return False
     return True
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
     Pulisce il DataFrame.
-    
-    LOGICA SMART PER LA DATA ODIERNA:
+    LOGICA SMART PER LA DATA ODIERNA (NY Time):
     - Se ora NY < 16:15: Rimuove i dati di oggi (candela incompleta).
     - Se ora NY >= 16:15: Mantiene i dati di oggi (candela chiusa).
-    - Se oggi è weekend: Non ci sono dati di oggi, mantiene l'ultimo disponibile.
     """
-    df = df.copy()
-    
-    # Remove NaN rows
-    df = df.dropna(subset=['Open', 'High', 'Low', 'Close'])
+    df = df.copy().dropna(subset=['Open', 'High', 'Low', 'Close'])
     
     # --- SMART DATE TRIMMING ---
-    # Verifichiamo se il mercato USA è chiuso
     ny_tz = pytz.timezone('America/New_York')
     now_ny = datetime.now(ny_tz)
-    
-    # Definizione orario chiusura (16:15 buffer)
     market_close_time = dt_time(16, 15)
     
     is_market_open = now_ny.time() < market_close_time
     today_date = now_ny.date()
     
-    # Identifichiamo i dati con data >= oggi (locale NY)
-    # Attenzione: df['Date'] è timestamp senza timezone, lo assumiamo compatibile
+    # Assicuriamo che 'Date' sia datetime
+    df['Date'] = pd.to_datetime(df['Date'])
     
     if is_market_open:
-        # Mercato APERTO: Rimuoviamo la data di oggi se presente (perché incompleta)
-        # Convertiamo la colonna date in date object per confronto
+        # Se il mercato è aperto (o appena chiuso ma non consolidato), rimuovi la riga di oggi
         df = df[df['Date'].dt.date < today_date]
-    else:
-        # Mercato CHIUSO: Accettiamo tutto (inclusa la candela di oggi se c'è)
-        # Non facciamo nulla, teniamo tutto.
-        pass
-        
-    # Ensure positive prices
-    price_cols = ['Open', 'High', 'Low', 'Close', 'Adj Close']
-    for col in price_cols:
-        if col in df.columns:
-            df = df[df[col] > 0]
     
-    # Sort by date
-    df = df.sort_values('Date').reset_index(drop=True)
-    
-    # Convert Volume
-    if 'Volume' in df.columns:
-        df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce').fillna(0)
+    # Rimuovi prezzi <= 0 e ordina
+    df = df[df['Close'] > 0].sort_values('Date').reset_index(drop=True)
     
     return df
 
