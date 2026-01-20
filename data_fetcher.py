@@ -9,7 +9,7 @@ Gestisce:
 - Download dati VIX da Yahoo Finance (Fallback/Override)
 - Rate limiting intelligente e Retry logic
 - Normalizzazione dati
-- FIX DATE: Taglio rigoroso alla data di ieri (T-1) per coerenza analisi
+- LOGICA SMART T-1: Accetta la data odierna SOLO se il mercato NY è chiuso.
 ============================================================================
 """
 
@@ -19,7 +19,8 @@ import numpy as np
 import time
 import random
 import yfinance as yf
-from datetime import datetime, timedelta, date
+import pytz  # Necessario per il fuso orario
+from datetime import datetime, timedelta, date, time as dt_time
 from typing import Dict, List, Optional, Tuple
 import logging
 
@@ -42,22 +43,23 @@ logger = logging.getLogger(__name__)
 def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
     """
     Scarica dati da Yahoo Finance e li normalizza nel formato EODHD.
-    Utile per ^VIX o altri indici non disponibili su EODHD.
+    Usa 'history' con periodo lungo per evitare buchi nei dati dovuti a feste.
     """
     try:
-        logger.info(f"📥 Fetching {ticker} via Yahoo Finance...")
+        logger.info(f"📥 Fetching {ticker} via Yahoo Finance (Max History)...")
         
-        # --- FIX APPLICATO QUI ---
-        # yfinance considera 'end' come esclusivo. 
-        # Se end_date è '2025-01-13' (Lunedì), yfinance si ferma al 12.
-        # Dobbiamo aggiungere 1 giorno per includere la data di 'end_date'.
+        # --- FIX: Usiamo history(period="10y") invece di date specifiche ---
+        # Questo garantisce di avere l'ultima candela disponibile (anche di oggi)
+        # bypassando problemi di calcolo date e festività (es. MLK Day).
         
-        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-        yf_end_date = (end_dt + timedelta(days=1)).strftime('%Y-%m-%d')
-        
-        # Usiamo yf_end_date invece di end_date
-        df = yf.download(ticker, start=start_date, end=yf_end_date, progress=False)
-        # -------------------------
+        # Gestione simbolo per Yahoo (aggiunge ^ se manca e se sembra un indice)
+        yf_ticker_name = ticker
+        if ticker == "VIX" or (ticker == "^VIX"):
+            yf_ticker_name = "^VIX"
+            
+        ticker_obj = yf.Ticker(yf_ticker_name)
+        df = ticker_obj.history(period="10y", auto_adjust=False)
+        # -------------------------------------------------------------------
         
         if df.empty:
             logger.warning(f"⚠️ Yahoo Finance ha restituito DataFrame vuoto per {ticker}")
@@ -66,10 +68,6 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
         # Reset index per avere 'Date' come colonna
         df = df.reset_index()
         
-        # Fix per le versioni recenti di yfinance che ritornano MultiIndex
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
         # Rinomina colonna data se necessario
         if 'Date' not in df.columns and 'index' in df.columns:
             df.rename(columns={'index': 'Date'}, inplace=True)
@@ -77,10 +75,21 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
         # Assicurati formattazione Date e rimozione timezone
         df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
         
+        # Filtro manuale della data di inizio (la fine la lasciamo aperta per prendere l'ultimo dato)
+        df = df[df['Date'] >= pd.to_datetime(start_date)]
+        
         # Filtra e ordina colonne richieste
+        # Yahoo restituisce: Open, High, Low, Close, Volume (e a volte Adj Close separato)
+        
+        # Normalizzazione nomi colonne (Yahoo Capitalizza, noi vogliamo coerenza)
+        df = df.rename(columns={
+            'Open': 'Open', 'High': 'High', 'Low': 'Low', 
+            'Close': 'Close', 'Adj Close': 'Adj Close', 'Volume': 'Volume'
+        })
+
         required_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
         
-        # Yahoo a volte non ha Volume per indici, gestiamo l'assenza
+        # Yahoo a volte non ha Volume per indici (es. VIX), gestiamo l'assenza
         if 'Volume' not in df.columns:
             df['Volume'] = 0
             
@@ -95,7 +104,7 @@ def fetch_from_yahoo(ticker: str, start_date: str, end_date: str) -> Optional[pd
         # Ordina per data
         df = df.sort_values('Date').reset_index(drop=True)
         
-        logger.info(f"✅ {ticker} (Yahoo): {len(df)} righe scaricate")
+        logger.info(f"✅ {ticker} (Yahoo): {len(df)} righe scaricate (Ultima: {df['Date'].iloc[-1].date()})")
         return df
 
     except Exception as e:
@@ -234,15 +243,11 @@ class EODHDClient:
             df['low'] = pd.to_numeric(df['low'], errors='coerce').fillna(0)
             
             # 2. Calcoliamo il fattore di rettifica
-            # Se adjusted_close è presente, il fattore è (Adjusted / Raw). Altrimenti è 1.
-            # Questo abbasserà i prezzi storici pre-split per allinearli al prezzo attuale.
             adj_factor = df['adjusted_close'] / df['close']
             adj_factor = adj_factor.fillna(1.0)
             
             # 3. Rettifichiamo OHLC
-            # Usiamo adjusted_close come 'Close' ufficiale
             df['Close'] = df['adjusted_close']
-            # Rettifichiamo Open, High, Low proporzionalmente
             df['Open'] = df['open'] * adj_factor
             df['High'] = df['high'] * adj_factor
             df['Low'] = df['low'] * adj_factor
@@ -253,31 +258,9 @@ class EODHDClient:
             df['Adj Close'] = df['adjusted_close']
             
             # 5. Pulizia finale
-            # Selezioniamo solo le colonne standard richieste dal sistema
             df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']]
             df = df.sort_values('Date').reset_index(drop=True)
             
-            return df
-            
-        except Exception as e:
-            logger.error(f"❌ Errore conversione DataFrame per {symbol}: {str(e)}")
-            return None
-            
-            # Rinomina colonne
-            column_mapping = {
-                'date': 'Date', 'open': 'Open', 'high': 'High', 
-                'low': 'Low', 'close': 'Close', 'volume': 'Volume', 
-                'adjusted_close': 'Adj Close'
-            }
-            df = df.rename(columns=column_mapping)
-            
-            # Converti Date
-            df['Date'] = pd.to_datetime(df['Date'])
-            
-            if 'Adj Close' not in df.columns:
-                df['Adj Close'] = df['Close']
-            
-            df = df.sort_values('Date').reset_index(drop=True)
             return df
             
         except Exception as e:
@@ -306,7 +289,7 @@ def download_ticker_data(
     """
     # --- LOGICA IBRIDA ---
     # Se il ticker è VIX, usiamo Yahoo Finance
-    if ticker == "^VIX":
+    if ticker == "^VIX" or ticker == "VIX":
         return fetch_from_yahoo(ticker, start_date, end_date)
     
     # Per tutti gli altri, usiamo EODHD
@@ -351,7 +334,7 @@ def download_universe_data(
             
             if df is not None and not df.empty:
                 # --- CRITICAL STEP: CLEAN & VALIDATE ---
-                # Pulisce i dati e, soprattutto, rimuove la data odierna
+                # Pulisce i dati applicando la logica oraria per la data odierna
                 df = clean_dataframe(df)
                 
                 if validate_dataframe(df, ticker):
@@ -381,10 +364,9 @@ def download_universe_data(
 
 def get_date_range_for_analysis() -> Tuple[str, str]:
     """
-    Calcola range date per analisi (T-1).
-    End date è rigorosamente IERI.
+    Calcola range date per analisi.
     """
-    # End date = ieri
+    # End date nominale = ieri (come fallback)
     end_date = datetime.now() - timedelta(days=1)
     
     # Start date = end_date - lookback
@@ -417,19 +399,41 @@ def validate_dataframe(df: pd.DataFrame, ticker: str) -> bool:
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Pulisce il DataFrame e rimuove rigorosamente la data odierna se presente.
-    Garantisce consistenza T-1 (analisi sui dati di chiusura ieri).
+    Pulisce il DataFrame.
+    
+    LOGICA SMART PER LA DATA ODIERNA:
+    - Se ora NY < 16:15: Rimuove i dati di oggi (candela incompleta).
+    - Se ora NY >= 16:15: Mantiene i dati di oggi (candela chiusa).
+    - Se oggi è weekend: Non ci sono dati di oggi, mantiene l'ultimo disponibile.
     """
     df = df.copy()
     
     # Remove NaN rows
     df = df.dropna(subset=['Open', 'High', 'Low', 'Close'])
     
-    # --- DATE TRIMMING LOGIC ---
-    # Rimuoviamo qualsiasi riga che abbia data >= Oggi (es. EODHD potrebbe dare dati intraday)
-    today = pd.Timestamp(date.today())
-    df = df[df['Date'] < today]
+    # --- SMART DATE TRIMMING ---
+    # Verifichiamo se il mercato USA è chiuso
+    ny_tz = pytz.timezone('America/New_York')
+    now_ny = datetime.now(ny_tz)
     
+    # Definizione orario chiusura (16:15 buffer)
+    market_close_time = dt_time(16, 15)
+    
+    is_market_open = now_ny.time() < market_close_time
+    today_date = now_ny.date()
+    
+    # Identifichiamo i dati con data >= oggi (locale NY)
+    # Attenzione: df['Date'] è timestamp senza timezone, lo assumiamo compatibile
+    
+    if is_market_open:
+        # Mercato APERTO: Rimuoviamo la data di oggi se presente (perché incompleta)
+        # Convertiamo la colonna date in date object per confronto
+        df = df[df['Date'].dt.date < today_date]
+    else:
+        # Mercato CHIUSO: Accettiamo tutto (inclusa la candela di oggi se c'è)
+        # Non facciamo nulla, teniamo tutto.
+        pass
+        
     # Ensure positive prices
     price_cols = ['Open', 'High', 'Low', 'Close', 'Adj Close']
     for col in price_cols:
@@ -464,8 +468,10 @@ if __name__ == "__main__":
     print(f"Range Analisi: {start} -> {end}")
     
     # Test VIX (Yahoo)
+    print("\n--- TEST VIX ---")
     vix = download_ticker_data("^VIX", start, end)
     if vix is not None:
-        print(f"VIX OK: {len(vix)} righe. Ultima: {vix['Date'].iloc[-1]}")
+        print(f"VIX OK: {len(vix)} righe.")
+        print(f"Ultima Data: {vix['Date'].iloc[-1]} (Close: {vix['Close'].iloc[-1]:.2f})")
     else:
         print("VIX Failed")
