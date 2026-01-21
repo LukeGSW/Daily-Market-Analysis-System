@@ -111,7 +111,7 @@ def run_daily_analysis():
         # Summary
         summary = get_analysis_summary(analysis_result)
         logger.info("\n📈 Analysis Summary:")
-        logger.info(f"   Market Condition: {summary['market_condition']}")
+        logger.info(f"   Market Condition: {summary['market_regime']}")
         logger.info(f"   VIX Level: {summary['vix_level']:.2f}")
         logger.info(f"   Instruments: {summary['instruments_count']}")
         logger.info(f"   Signals: {summary['total_signals']}")
