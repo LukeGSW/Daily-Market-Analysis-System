@@ -317,7 +317,7 @@ def render_rankings(rankings):
                 color = get_score_color(val)
                 return f'background-color: {color}; color: white; font-weight: bold;'
             
-            styled_df = df_top.style.applymap(
+            styled_df = df_top.style.map(
                 style_score,
                 subset=['Score']
             ).format({
@@ -349,7 +349,7 @@ def render_rankings(rankings):
                 for item in bottom_5
             ])
             
-            styled_df = df_bottom.style.applymap(
+            styled_df = df_bottom.style.map(
                 style_score,
                 subset=['Score']
             ).format({
