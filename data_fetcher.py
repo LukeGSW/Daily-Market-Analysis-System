@@ -5,8 +5,8 @@ KRITERION QUANT - Daily Market Analysis System
 Data Fetcher Module - Hybrid (EODHD + Yahoo Finance)
 ============================================================================
 Gestisce:
-- Download dati storici da EODHD API (Default per azioni/ETF)
-- Download dati VIX da Yahoo Finance (Fallback/Override)
+- Download dati storici da EODHD API (azioni/ETF/indici, incluso VIX.INDX)
+- Yahoo Finance usato solo come fallback per il VIX se EODHD non risponde
 - Rate limiting intelligente e Retry logic
 - Normalizzazione dati
 - LOGICA SMART: Richiede dati fino a OGGI, ma li valida rigorosamente.
@@ -175,7 +175,14 @@ class EODHDClient:
         try:
             df = pd.DataFrame(data)
             if df.empty: return None
-            
+
+            # Alcuni strumenti (es. indici come VIX.INDX) possono non avere
+            # tutte le colonne standard: le creiamo per sicurezza.
+            if 'adjusted_close' not in df.columns:
+                df['adjusted_close'] = df['close']
+            if 'volume' not in df.columns:
+                df['volume'] = 0
+
             # Conversione numerica
             for col in ['close', 'adjusted_close', 'open', 'high', 'low', 'volume']:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -205,16 +212,22 @@ class EODHDClient:
 # ============================================================================
 
 def download_ticker_data(ticker: str, start_date: str, end_date: str, retries: int = 3) -> Optional[pd.DataFrame]:
-    # VIX -> Yahoo
-    if ticker == "^VIX" or ticker == "VIX":
-        return fetch_from_yahoo(ticker, start_date, end_date)
-    
-    # Altri -> EODHD
     ticker_info = UNIVERSE.get(ticker)
     if not ticker_info: return None
-    
+
+    exchange = ticker_info.get('eodhd_exchange', 'US')
+    # Il simbolo EODHD non usa il prefisso '^' (es. VIX.INDX, non ^VIX.INDX)
+    eodhd_ticker = ticker.lstrip('^')
+
     client = EODHDClient()
-    return client.get_eod_data(ticker, ticker_info.get('eodhd_exchange', 'US'), start_date, end_date)
+    df = client.get_eod_data(eodhd_ticker, exchange, start_date, end_date)
+
+    # Fallback su Yahoo solo per il VIX, nel raro caso in cui EODHD non risponda
+    if (df is None or df.empty) and ticker in ("^VIX", "VIX"):
+        logger.warning("⚠️ VIX non disponibile da EODHD, provo fallback Yahoo Finance...")
+        df = fetch_from_yahoo(ticker, start_date, end_date)
+
+    return df
 
 def download_universe_data(start_date: str, end_date: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
     logger.info(f"🚀 Avvio download universo ({len(UNIVERSE)} ticker)")
@@ -319,7 +332,7 @@ if __name__ == "__main__":
     start, end = get_date_range_for_analysis()
     print(f"Range Analisi: {start} -> {end}")
     
-    # Test VIX (Yahoo)
+    # Test VIX (EODHD -> fallback Yahoo)
     print("\n--- TEST VIX ---")
     vix = download_ticker_data("^VIX", start, end)
     if vix is not None:
